@@ -32,3 +32,6 @@ server/.env.local
 *.njsproj
 *.sln
 *.sw?
+
+# Installation methods (contains installation scripts)
+installation-methods
