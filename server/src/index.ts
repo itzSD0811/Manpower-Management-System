@@ -48,7 +48,8 @@ app.get('/api/config', async (req, res) => {
       const defaultConfig = {
         dbType: 'firebase',
         mysqlConfig: {},
-        firebaseConfig: {}
+        firebaseConfig: {},
+        recaptchaConfig: {}
       };
       res.json(defaultConfig);
     } else {
@@ -480,7 +481,7 @@ const readConfig = async () => {
         return JSON.parse(configData);
     } catch (error: any) {
         if (error.code === 'ENOENT') {
-            return { dbType: 'firebase', mysqlConfig: {}, firebaseConfig: {}, twoFactorAuth: { enabled: false } };
+            return { dbType: 'firebase', mysqlConfig: {}, firebaseConfig: {}, recaptchaConfig: {}, twoFactorAuth: { enabled: false } };
         }
         throw error;
     }
@@ -625,6 +626,63 @@ app.get('/api/2fa/status', async (req, res) => {
         });
     } catch (error: any) {
         console.error('Error getting 2FA status:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// reCAPTCHA API - Verify reCAPTCHA token
+app.post('/api/recaptcha/verify', async (req, res) => {
+    try {
+        const { token } = req.body;
+
+        if (!token) {
+            return res.status(400).json({ success: false, message: 'reCAPTCHA token is required' });
+        }
+
+        // Try to get secret key from config.json first, then fallback to environment variable
+        const config = await readConfig();
+        
+        // Check if reCAPTCHA is enabled
+        if (!config.recaptchaConfig?.enabled) {
+            // If reCAPTCHA is disabled, allow the request
+            return res.json({ success: true, message: 'reCAPTCHA verification skipped (disabled)' });
+        }
+        
+        const recaptchaSecretKey = config.recaptchaConfig?.secretKey || process.env.RECAPTCHA_SECRET_KEY;
+        
+        if (!recaptchaSecretKey) {
+            // If secret key is not configured, allow the request (for development)
+            console.warn('reCAPTCHA secret key not configured, skipping verification');
+            return res.json({ success: true, message: 'reCAPTCHA verification skipped (not configured)' });
+        }
+
+        // Verify token with Google reCAPTCHA API
+        const verifyUrl = 'https://www.google.com/recaptcha/api/siteverify';
+        const response = await fetch(verifyUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `secret=${recaptchaSecretKey}&response=${token}`
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            res.json({ 
+                success: true, 
+                message: 'reCAPTCHA verification successful',
+                score: data.score // For v3, includes a score (0.0 to 1.0)
+            });
+        } else {
+            res.status(400).json({ 
+                success: false, 
+                message: 'reCAPTCHA verification failed',
+                errors: data['error-codes'] || []
+            });
+        }
+    } catch (error: any) {
+        console.error('Error verifying reCAPTCHA:', error);
         res.status(500).json({ success: false, message: error.message });
     }
 });

@@ -80,4 +80,10 @@ export interface MysqlConfig {
   database?: string;
 }
 
+export interface RecaptchaConfig {
+  siteKey?: string;
+  secretKey?: string;
+  enabled?: boolean;
+}
+
 export type ModalMode = 'create' | 'edit' | 'view';

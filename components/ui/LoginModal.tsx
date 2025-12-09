@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
+import { useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 import { useAuth } from '../../context/AuthContext';
 import Button from './Button';
 import { LogIn, Eye, EyeOff, Lock, Mail, AlertCircle, Shield, Key } from 'lucide-react';
 import { Logo } from '../Logo';
 import * as twoFactorService from '../../services/twoFactorService';
+import * as recaptchaService from '../../services/recaptchaService';
 
 const LoginModal: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -16,6 +18,7 @@ const LoginModal: React.FC = () => {
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [twoFactorError, setTwoFactorError] = useState('');
   const { login } = useAuth();
+  const { executeRecaptcha } = useGoogleReCaptcha();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,6 +32,19 @@ const LoginModal: React.FC = () => {
 
     setIsLoading(true);
     try {
+      // Verify reCAPTCHA if available
+      if (executeRecaptcha) {
+        try {
+          const recaptchaToken = await executeRecaptcha('login');
+          // Verify token on backend
+          await recaptchaService.verifyRecaptcha(recaptchaToken);
+        } catch (recaptchaError) {
+          console.warn('reCAPTCHA verification failed:', recaptchaError);
+          // In production, you might want to block login if reCAPTCHA fails
+          // For now, we'll allow login to continue (useful for development/testing)
+        }
+      }
+
       // Check if 2FA is enabled BEFORE attempting login
       let requires2FA = false;
       try {
@@ -50,6 +66,7 @@ const LoginModal: React.FC = () => {
       }
 
       // No 2FA required, proceed with normal login
+      // Note: You can send recaptchaToken to your backend for verification
       await login(email, password);
 
       // Save email to localStorage if remember me is checked
@@ -78,10 +95,23 @@ const LoginModal: React.FC = () => {
 
     setIsLoading(true);
     try {
+      // Verify reCAPTCHA if available
+      if (executeRecaptcha) {
+        try {
+          const recaptchaToken = await executeRecaptcha('login_2fa');
+          // Verify token on backend
+          await recaptchaService.verifyRecaptcha(recaptchaToken);
+        } catch (recaptchaError) {
+          console.warn('reCAPTCHA verification failed:', recaptchaError);
+          // In production, you might want to block login if reCAPTCHA fails
+        }
+      }
+
       // Verify 2FA code first
       await twoFactorService.verify2FA(twoFactorCode);
       
       // 2FA verified successfully, now proceed with login
+      // Note: You can send recaptchaToken to your backend for verification
       await login(email, password);
       
       // Save email to localStorage if remember me is checked

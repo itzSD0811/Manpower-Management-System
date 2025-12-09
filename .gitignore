@@ -16,6 +16,11 @@ chatmedia
 # Configuration files (contains sensitive data)
 config.json
 server/config.json
+.env
+.env.local
+.env.*.local
+server/.env
+server/.env.local
 
 # Editor directories and files
 .vscode/*

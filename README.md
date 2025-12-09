@@ -26,12 +26,26 @@ A comprehensive Enterprise Resource Planning (ERP) dashboard designed for DNS Su
    npm install
    ```
 
-2. Run development server:
+2. Configure reCAPTCHA (Optional but recommended for login security):
+   - Go to [Google reCAPTCHA Admin Console](https://www.google.com/recaptcha/admin)
+   - Register a new site and select reCAPTCHA v3
+   - Copy your Site Key and Secret Key
+   - Create a `.env` file in the root directory with:
+     ```
+     VITE_RECAPTCHA_SITE_KEY=your_site_key_here
+     ```
+   - For backend verification, add to `server/.env`:
+     ```
+     RECAPTCHA_SECRET_KEY=your_secret_key_here
+     ```
+   - Note: If reCAPTCHA keys are not configured, the login will still work (useful for development)
+
+3. Run development server:
    ```bash
    npm run dev
    ```
 
-3. Build for production:
+4. Build for production:
    ```bash
    npm run build
    ```

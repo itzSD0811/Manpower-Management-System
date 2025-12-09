@@ -1,4 +1,4 @@
-import { MysqlConfig, FirebaseConfig } from '../types';
+import { MysqlConfig, FirebaseConfig, RecaptchaConfig } from '../types';
 
 export type DbType = 'firebase' | 'mysql';
 
@@ -6,6 +6,7 @@ export interface AppConfig {
   dbType: DbType;
   mysqlConfig?: MysqlConfig;
   firebaseConfig?: FirebaseConfig;
+  recaptchaConfig?: RecaptchaConfig;
 }
 
 const API_URL = 'http://localhost:3001/api';
@@ -14,6 +15,7 @@ const API_URL = 'http://localhost:3001/api';
 const DB_SELECTION_KEY = 'dbSelection';
 const MYSQL_CONFIG_KEY = 'mysqlConfig';
 const FIREBASE_CONFIG_KEY = 'firebaseConfig';
+const RECAPTCHA_CONFIG_KEY = 'recaptchaConfig';
 
 // Load config from API, fallback to localStorage if API fails
 export const loadConfig = async (): Promise<AppConfig> => {
@@ -31,6 +33,9 @@ export const loadConfig = async (): Promise<AppConfig> => {
       if (config.firebaseConfig) {
         localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(config.firebaseConfig));
       }
+      if (config.recaptchaConfig) {
+        localStorage.setItem(RECAPTCHA_CONFIG_KEY, JSON.stringify(config.recaptchaConfig));
+      }
       return config;
     }
     throw new Error('Failed to load config from server');
@@ -40,14 +45,17 @@ export const loadConfig = async (): Promise<AppConfig> => {
     const dbType = localStorage.getItem(DB_SELECTION_KEY) as DbType | null;
     const mysqlConfigStr = localStorage.getItem(MYSQL_CONFIG_KEY);
     const firebaseConfigStr = localStorage.getItem(FIREBASE_CONFIG_KEY);
+    const recaptchaConfigStr = localStorage.getItem(RECAPTCHA_CONFIG_KEY);
 
     const mysqlConfig = mysqlConfigStr ? JSON.parse(mysqlConfigStr) : {};
     const firebaseConfig = firebaseConfigStr ? JSON.parse(firebaseConfigStr) : {};
+    const recaptchaConfig = recaptchaConfigStr ? JSON.parse(recaptchaConfigStr) : {};
 
     return {
       dbType: dbType || 'firebase',
       mysqlConfig: mysqlConfig,
-      firebaseConfig: firebaseConfig
+      firebaseConfig: firebaseConfig,
+      recaptchaConfig: recaptchaConfig
     };
   }
 };
@@ -75,6 +83,9 @@ export const saveConfig = async (config: AppConfig): Promise<void> => {
     if (config.dbType === 'firebase' && config.firebaseConfig) {
       localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(config.firebaseConfig));
     }
+    if (config.recaptchaConfig) {
+      localStorage.setItem(RECAPTCHA_CONFIG_KEY, JSON.stringify(config.recaptchaConfig));
+    }
   } catch (error) {
     console.error('Failed to save config to API, saving to localStorage only:', error);
     // Fallback to localStorage only
@@ -85,6 +96,9 @@ export const saveConfig = async (config: AppConfig): Promise<void> => {
     if (config.dbType === 'firebase' && config.firebaseConfig) {
       localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(config.firebaseConfig));
     }
+    if (config.recaptchaConfig) {
+      localStorage.setItem(RECAPTCHA_CONFIG_KEY, JSON.stringify(config.recaptchaConfig));
+    }
     throw error; // Re-throw so caller knows it failed
   }
 };
@@ -94,13 +108,16 @@ export const loadConfigSync = (): AppConfig => {
   const dbType = localStorage.getItem(DB_SELECTION_KEY) as DbType | null;
   const mysqlConfigStr = localStorage.getItem(MYSQL_CONFIG_KEY);
   const firebaseConfigStr = localStorage.getItem(FIREBASE_CONFIG_KEY);
+  const recaptchaConfigStr = localStorage.getItem(RECAPTCHA_CONFIG_KEY);
 
   const mysqlConfig = mysqlConfigStr ? JSON.parse(mysqlConfigStr) : {};
   const firebaseConfig = firebaseConfigStr ? JSON.parse(firebaseConfigStr) : {};
+  const recaptchaConfig = recaptchaConfigStr ? JSON.parse(recaptchaConfigStr) : {};
 
   return {
     dbType: dbType || 'firebase',
     mysqlConfig: mysqlConfig,
-    firebaseConfig: firebaseConfig
+    firebaseConfig: firebaseConfig,
+    recaptchaConfig: recaptchaConfig
   };
 };

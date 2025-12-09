@@ -16,7 +16,7 @@ const Input: React.FC<InputProps> = ({ label, error, helperText, className = '',
       <input
         className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-dns-red focus:border-dns-red sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200 ${
           error ? 'border-red-300 dark:border-red-500' : 'border-gray-300 dark:border-gray-600'
-        } ${className}`}
+        } ${props.disabled ? 'opacity-50 cursor-not-allowed bg-gray-100 dark:bg-gray-800' : ''} ${className}`}
         {...props}
       />
       {helperText && !error && <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{helperText}</p>}

@@ -4,11 +4,12 @@ import { Flame, CheckCircle, Server, Activity, AlertTriangle, ShieldAlert, LogOu
 import * as firebase from '../services/firebaseDataService';
 import * as mysql from '../services/mysqlDataService';
 import { saveConfig, loadConfig, loadConfigSync, AppConfig } from '../services/configService';
-import { MysqlConfig, FirebaseConfig } from '../types';
+import { MysqlConfig, FirebaseConfig, RecaptchaConfig } from '../types';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import { useAuth } from '../context/AuthContext';
 import FirebaseSetupGuide from '../components/ui/FirebaseSetupGuide';
+import RecaptchaSetupGuide from '../components/ui/RecaptchaSetupGuide';
 import * as twoFactorService from '../services/twoFactorService';
 import Modal from '../components/ui/Modal';
 
@@ -27,9 +28,15 @@ const SystemConfig: React.FC = () => {
     messagingSenderId: '',
     appId: '',
   });
+  const [recaptchaConfig, setRecaptchaConfig] = useState<RecaptchaConfig>({
+    siteKey: '',
+    secretKey: '',
+    enabled: false,
+  });
 
   // UI State
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
+  const [isRecaptchaTutorialOpen, setIsRecaptchaTutorialOpen] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Diagnostics State
@@ -50,6 +57,7 @@ const SystemConfig: React.FC = () => {
   const [verificationCode, setVerificationCode] = useState('');
   const [twoFactorError, setTwoFactorError] = useState('');
   const [twoFactorSuccess, setTwoFactorSuccess] = useState('');
+  const [recaptchaError, setRecaptchaError] = useState('');
 
 
   // Load config from API on mount
@@ -64,6 +72,9 @@ const SystemConfig: React.FC = () => {
         if (config.firebaseConfig) {
           setFirebaseConfig(config.firebaseConfig);
         }
+        if (config.recaptchaConfig) {
+          setRecaptchaConfig(config.recaptchaConfig);
+        }
       } catch (error) {
         console.error('Failed to load config:', error);
         // Fallback to sync version
@@ -74,6 +85,9 @@ const SystemConfig: React.FC = () => {
         }
         if (config.firebaseConfig) {
           setFirebaseConfig(config.firebaseConfig);
+        }
+        if (config.recaptchaConfig) {
+          setRecaptchaConfig(config.recaptchaConfig);
         }
       }
     };
@@ -157,6 +171,7 @@ const SystemConfig: React.FC = () => {
       dbType: dbSelection,
       mysqlConfig: mysqlConfig,
       firebaseConfig: firebaseConfig,
+      recaptchaConfig: recaptchaConfig,
     };
     try {
       await saveConfig(newConfig);
@@ -410,6 +425,114 @@ const SystemConfig: React.FC = () => {
                 </div>
             )}
 
+            {/* Google reCAPTCHA Configuration */}
+            <div className="bg-white dark:bg-gray-800 shadow rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden transition-colors duration-200">
+                <div className="p-6 border-b border-gray-100 dark:border-gray-700">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 flex-1">
+                        <div className="p-2 bg-purple-50 dark:bg-purple-900/30 rounded-lg">
+                            <Shield className="text-purple-600 dark:text-purple-400" size={24} />
+                        </div>
+                        <div className="flex-1">
+                            <h2 className="text-lg font-medium text-gray-900 dark:text-white">Google reCAPTCHA</h2>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">Protect your login page from bots and automated attacks.</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <Button variant="secondary" size="sm" onClick={() => setIsRecaptchaTutorialOpen(true)} icon={<HelpCircle size={14} />}>
+                          How to setup?
+                        </Button>
+                        {/* Toggle Switch */}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                // Only allow enabling if both keys are provided
+                                if (!recaptchaConfig.enabled && (!recaptchaConfig.siteKey || !recaptchaConfig.secretKey)) {
+                                    setRecaptchaError('Please enter both Site Key and Secret Key before enabling reCAPTCHA.');
+                                    // Clear error after 5 seconds
+                                    setTimeout(() => setRecaptchaError(''), 5000);
+                                    return;
+                                }
+                                setRecaptchaError(''); // Clear any previous errors
+                                setRecaptchaConfig({...recaptchaConfig, enabled: !recaptchaConfig.enabled});
+                            }}
+                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-dns-red focus:ring-offset-2 ${
+                                recaptchaConfig.enabled ? 'bg-purple-600' : 'bg-gray-200 dark:bg-gray-600'
+                            }`}
+                            role="switch"
+                            aria-checked={recaptchaConfig.enabled}
+                        >
+                            <span
+                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                    recaptchaConfig.enabled ? 'translate-x-5' : 'translate-x-0'
+                                }`}
+                            />
+                        </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-6 space-y-4">
+                    {recaptchaError && (
+                        <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-3">
+                            <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1">
+                                <p className="text-sm font-medium text-red-800 dark:text-red-200">Configuration Required</p>
+                                <p className="text-sm text-red-700 dark:text-red-300 mt-1">{recaptchaError}</p>
+                            </div>
+                            <button
+                                onClick={() => setRecaptchaError('')}
+                                className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                    )}
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                Status: <span className={recaptchaConfig.enabled ? 'text-purple-600 dark:text-purple-400' : 'text-gray-500 dark:text-gray-400'}>
+                                    {recaptchaConfig.enabled ? 'Enabled' : 'Disabled'}
+                                </span>
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                {recaptchaConfig.enabled 
+                                    ? 'reCAPTCHA protection is active on the login page'
+                                    : 'reCAPTCHA protection is disabled'}
+                            </p>
+                        </div>
+                    </div>
+                    <Input 
+                        label="Site Key" 
+                        placeholder="6Lc..." 
+                        value={recaptchaConfig.siteKey || ''} 
+                        onChange={(e) => setRecaptchaConfig({...recaptchaConfig, siteKey: e.target.value})} 
+                        helperText="Public key used by the frontend. Safe to expose."
+                    />
+                    <Input 
+                        label="Secret Key" 
+                        type="password" 
+                        placeholder="6Lc..." 
+                        value={recaptchaConfig.secretKey || ''} 
+                        onChange={(e) => setRecaptchaConfig({...recaptchaConfig, secretKey: e.target.value})} 
+                        helperText="Private key used by the backend. Keep this secure!"
+                    />
+                    {recaptchaConfig.enabled && (
+                        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                            <p className="text-sm text-green-800 dark:text-green-200">
+                                <strong>✓ Active:</strong> reCAPTCHA v3 is protecting your login page. Users won't see a checkbox, but the system will automatically verify them during login attempts.
+                            </p>
+                        </div>
+                    )}
+                    {!recaptchaConfig.enabled && (
+                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                            <p className="text-sm text-blue-800 dark:text-blue-200">
+                                <strong>Note:</strong> reCAPTCHA v3 works invisibly in the background. Users won't see a checkbox, but the system will automatically verify them during login attempts.
+                            </p>
+                        </div>
+                    )}
+                </div>
+            </div>
+
             {/* Two-Factor Authentication Card */}
             <div className="bg-white dark:bg-gray-800 shadow rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden transition-colors duration-200">
                 <div className="p-6 border-b border-gray-100 dark:border-gray-700">
@@ -620,6 +743,7 @@ service cloud.firestore {
         </div>
       </div>
       <FirebaseSetupGuide isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
+      <RecaptchaSetupGuide isOpen={isRecaptchaTutorialOpen} onClose={() => setIsRecaptchaTutorialOpen(false)} />
       
       {/* 2FA QR Code Modal */}
       <Modal isOpen={qrCodeModalOpen} onClose={() => {
