@@ -1,0 +1,75 @@
+DROP TABLE IF EXISTS employee_attendance_metadata;
+DROP TABLE IF EXISTS attendance_data;
+DROP TABLE IF EXISTS attendance_records;
+DROP TABLE IF EXISTS employees;
+DROP TABLE IF EXISTS group_salaries;
+DROP TABLE IF EXISTS `groups`;
+DROP TABLE IF EXISTS sections;
+
+CREATE TABLE sections (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  codeId VARCHAR(255) NOT NULL UNIQUE
+);
+
+CREATE TABLE `groups` (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  codeId VARCHAR(255) NOT NULL UNIQUE,
+  sectionId VARCHAR(36) NOT NULL,
+  FOREIGN KEY (sectionId) REFERENCES sections(id) ON DELETE CASCADE
+);
+
+CREATE TABLE group_salaries (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  groupId VARCHAR(36) NOT NULL,
+  month VARCHAR(7) NOT NULL,
+  amount DECIMAL(10, 2) NOT NULL,
+  FOREIGN KEY (groupId) REFERENCES `groups`(id) ON DELETE CASCADE,
+  UNIQUE KEY (groupId, month)
+);
+
+CREATE TABLE employees (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  fullName VARCHAR(255) NOT NULL,
+  nic VARCHAR(255) NOT NULL UNIQUE,
+  employeeNumber VARCHAR(255) NOT NULL UNIQUE,
+  phoneNumber VARCHAR(255),
+  address TEXT,
+  sectionId VARCHAR(36) NOT NULL,
+  groupId VARCHAR(36) NOT NULL,
+  joinedDate DATE,
+  FOREIGN KEY (sectionId) REFERENCES sections(id) ON DELETE CASCADE,
+  FOREIGN KEY (groupId) REFERENCES `groups`(id) ON DELETE CASCADE
+);
+
+CREATE TABLE attendance_records (
+  id VARCHAR(255) NOT NULL PRIMARY KEY, -- YYYY-MM-sectionId
+  year INT NOT NULL,
+  month INT NOT NULL,
+  sectionId VARCHAR(36) NOT NULL,
+  FOREIGN KEY (sectionId) REFERENCES sections(id) ON DELETE CASCADE
+);
+
+CREATE TABLE attendance_data (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  recordId VARCHAR(255) NOT NULL,
+  employeeId VARCHAR(36) NOT NULL,
+  day INT NOT NULL,
+  day_status BOOLEAN NOT NULL DEFAULT FALSE,
+  night_status BOOLEAN NOT NULL DEFAULT FALSE,
+  day_half_status BOOLEAN NOT NULL DEFAULT FALSE,
+  night_half_status BOOLEAN NOT NULL DEFAULT FALSE,
+  FOREIGN KEY (recordId) REFERENCES attendance_records(id) ON DELETE CASCADE,
+  FOREIGN KEY (employeeId) REFERENCES employees(id) ON DELETE CASCADE
+);
+
+CREATE TABLE employee_attendance_metadata (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  recordId VARCHAR(255) NOT NULL,
+  employeeId VARCHAR(36) NOT NULL,
+  additional_shifts FLOAT NOT NULL DEFAULT 0,
+  FOREIGN KEY (recordId) REFERENCES attendance_records(id) ON DELETE CASCADE,
+  FOREIGN KEY (employeeId) REFERENCES employees(id) ON DELETE CASCADE,
+  UNIQUE KEY (recordId, employeeId)
+);

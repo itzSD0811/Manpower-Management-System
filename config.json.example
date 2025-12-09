@@ -1,0 +1,20 @@
+{
+  "dbType": "firebase",
+  "mysqlConfig": {
+    "host": "localhost",
+    "port": 3306,
+    "user": "root",
+    "password": "",
+    "database": "dns_manpower"
+  },
+  "firebaseConfig": {
+    "apiKey": "",
+    "authDomain": "",
+    "projectId": "",
+    "storageBucket": "",
+    "messagingSenderId": "",
+    "appId": ""
+  }
+}
+
+
