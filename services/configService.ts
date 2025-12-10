@@ -16,6 +16,7 @@ const DB_SELECTION_KEY = 'dbSelection';
 const MYSQL_CONFIG_KEY = 'mysqlConfig';
 const FIREBASE_CONFIG_KEY = 'firebaseConfig';
 const RECAPTCHA_CONFIG_KEY = 'recaptchaConfig';
+const ADMINISTRATOR_EMAIL_KEY = 'administratorEmail';
 
 // Load config from API, fallback to localStorage if API fails
 export const loadConfig = async (): Promise<AppConfig> => {
@@ -36,6 +37,9 @@ export const loadConfig = async (): Promise<AppConfig> => {
       if (config.recaptchaConfig) {
         localStorage.setItem(RECAPTCHA_CONFIG_KEY, JSON.stringify(config.recaptchaConfig));
       }
+      if (config.administratorEmail) {
+        localStorage.setItem(ADMINISTRATOR_EMAIL_KEY, config.administratorEmail);
+      }
       return config;
     }
     throw new Error('Failed to load config from server');
@@ -46,6 +50,7 @@ export const loadConfig = async (): Promise<AppConfig> => {
     const mysqlConfigStr = localStorage.getItem(MYSQL_CONFIG_KEY);
     const firebaseConfigStr = localStorage.getItem(FIREBASE_CONFIG_KEY);
     const recaptchaConfigStr = localStorage.getItem(RECAPTCHA_CONFIG_KEY);
+    const administratorEmail = localStorage.getItem(ADMINISTRATOR_EMAIL_KEY);
 
     const mysqlConfig = mysqlConfigStr ? JSON.parse(mysqlConfigStr) : {};
     const firebaseConfig = firebaseConfigStr ? JSON.parse(firebaseConfigStr) : {};
@@ -55,24 +60,49 @@ export const loadConfig = async (): Promise<AppConfig> => {
       dbType: dbType || 'firebase',
       mysqlConfig: mysqlConfig,
       firebaseConfig: firebaseConfig,
-      recaptchaConfig: recaptchaConfig
+      recaptchaConfig: recaptchaConfig,
+      administratorEmail: administratorEmail || undefined
     };
   }
 };
 
+// Verify config password
+export const verifyConfigPassword = async (password?: string, token?: string): Promise<boolean> => {
+  try {
+    const response = await fetch(`${API_URL}/config/verify-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ password, token }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Password verification failed');
+    }
+
+    const result = await response.json();
+    return result.success;
+  } catch (error: any) {
+    throw error;
+  }
+};
+
 // Save config to API, also save to localStorage as backup
-export const saveConfig = async (config: AppConfig): Promise<void> => {
+export const saveConfig = async (config: AppConfig, password?: string, token?: string): Promise<void> => {
   try {
     const response = await fetch(`${API_URL}/config`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(config),
+      body: JSON.stringify({ config, password, token }),
     });
 
     if (!response.ok) {
-      throw new Error('Failed to save config to server');
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to save config to server');
     }
 
     // Also save to localStorage as backup
@@ -85,6 +115,9 @@ export const saveConfig = async (config: AppConfig): Promise<void> => {
     }
     if (config.recaptchaConfig) {
       localStorage.setItem(RECAPTCHA_CONFIG_KEY, JSON.stringify(config.recaptchaConfig));
+    }
+    if (config.administratorEmail) {
+      localStorage.setItem(ADMINISTRATOR_EMAIL_KEY, config.administratorEmail);
     }
   } catch (error) {
     console.error('Failed to save config to API, saving to localStorage only:', error);
@@ -99,6 +132,9 @@ export const saveConfig = async (config: AppConfig): Promise<void> => {
     if (config.recaptchaConfig) {
       localStorage.setItem(RECAPTCHA_CONFIG_KEY, JSON.stringify(config.recaptchaConfig));
     }
+    if (config.administratorEmail) {
+      localStorage.setItem(ADMINISTRATOR_EMAIL_KEY, config.administratorEmail);
+    }
     throw error; // Re-throw so caller knows it failed
   }
 };
@@ -109,6 +145,7 @@ export const loadConfigSync = (): AppConfig => {
   const mysqlConfigStr = localStorage.getItem(MYSQL_CONFIG_KEY);
   const firebaseConfigStr = localStorage.getItem(FIREBASE_CONFIG_KEY);
   const recaptchaConfigStr = localStorage.getItem(RECAPTCHA_CONFIG_KEY);
+  const administratorEmail = localStorage.getItem(ADMINISTRATOR_EMAIL_KEY);
 
   const mysqlConfig = mysqlConfigStr ? JSON.parse(mysqlConfigStr) : {};
   const firebaseConfig = firebaseConfigStr ? JSON.parse(firebaseConfigStr) : {};
@@ -118,6 +155,7 @@ export const loadConfigSync = (): AppConfig => {
     dbType: dbType || 'firebase',
     mysqlConfig: mysqlConfig,
     firebaseConfig: firebaseConfig,
-    recaptchaConfig: recaptchaConfig
+    recaptchaConfig: recaptchaConfig,
+    administratorEmail: administratorEmail || undefined
   };
 };

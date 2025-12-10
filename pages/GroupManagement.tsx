@@ -6,11 +6,15 @@ import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import Modal from '../components/ui/Modal';
+import { useAuth } from '../context/AuthContext';
+import { canUserEditPage } from '../services/permissionService';
 
 const GroupManagement: React.FC = () => {
+  const { currentUser } = useAuth();
   const [groups, setGroups] = useState<GroupEntity[]>([]);
   const [sections, setSections] = useState<SectionEntity[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
   
   // Create/Edit Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -38,7 +42,15 @@ const GroupManagement: React.FC = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+    checkPermissions();
+  }, [currentUser]);
+
+  const checkPermissions = async () => {
+    if (currentUser?.uid) {
+      const hasEdit = await canUserEditPage(currentUser.uid, 'groups');
+      setCanEdit(hasEdit);
+    }
+  };
 
   const loadData = async () => {
     setIsLoading(true);
@@ -258,9 +270,11 @@ const GroupManagement: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Group Definitions</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage groups and monthly salary structures.</p>
         </div>
-        <Button onClick={handleOpenCreate} icon={<Plus size={16} />}>
-          Create New Group
-        </Button>
+        {canEdit && (
+          <Button onClick={handleOpenCreate} icon={<Plus size={16} />}>
+            Create New Group
+          </Button>
+        )}
       </div>
 
       {successMessage && (
@@ -316,32 +330,34 @@ const GroupManagement: React.FC = () => {
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div className="flex justify-end gap-2">
-                          <button 
-                              onClick={(e) => { e.stopPropagation(); handleOpenSalaryManager(grp); }}
-                              className="text-green-600 dark:text-green-400 hover:text-green-900 dark:hover:text-green-300 bg-green-50 dark:bg-green-900/30 p-2 rounded-full hover:bg-green-100 dark:hover:bg-green-900/50"
-                              title="Manage Salaries"
-                          >
-                              <Banknote size={16} />
-                          </button>
-                          <button 
-                              onClick={(e) => { e.stopPropagation(); handleOpenEdit(grp); }}
-                              className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 p-2 rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
-                          >
-                            <Edit size={16} />
-                          </button>
-                          <button 
-                              onClick={(e) => { e.stopPropagation(); handleVerifyDelete(grp); }}
-                              className={`text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 bg-red-50 dark:bg-red-900/30 p-2 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 ${verifyingId === grp.id ? 'opacity-50' : ''}`}
-                              disabled={verifyingId === grp.id}
-                          >
-                            {verifyingId === grp.id ? (
-                                  <svg className="animate-spin h-4 w-4 text-red-600 dark:text-red-400" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                              ) : (
-                                  <Trash2 size={16} />
-                              )}
-                          </button>
-                      </div>
+                      {canEdit && (
+                        <div className="flex justify-end gap-2">
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); handleOpenSalaryManager(grp); }}
+                                className="text-green-600 dark:text-green-400 hover:text-green-900 dark:hover:text-green-300 bg-green-50 dark:bg-green-900/30 p-2 rounded-full hover:bg-green-100 dark:hover:bg-green-900/50"
+                                title="Manage Salaries"
+                            >
+                                <Banknote size={16} />
+                            </button>
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); handleOpenEdit(grp); }}
+                                className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 p-2 rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
+                            >
+                              <Edit size={16} />
+                            </button>
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); handleVerifyDelete(grp); }}
+                                className={`text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 bg-red-50 dark:bg-red-900/30 p-2 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 ${verifyingId === grp.id ? 'opacity-50' : ''}`}
+                                disabled={verifyingId === grp.id}
+                            >
+                              {verifyingId === grp.id ? (
+                                    <svg className="animate-spin h-4 w-4 text-red-600 dark:text-red-400" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                ) : (
+                                    <Trash2 size={16} />
+                                )}
+                            </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );

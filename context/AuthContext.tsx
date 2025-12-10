@@ -99,14 +99,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     try {
-      if (!auth) {
+    if (!auth) {
         console.warn("Auth not available for logout");
         // Clear local state even if auth is not available
         setCurrentUser(null);
-        return;
-      }
+      return;
+    }
       console.log("Logging out...");
-      await signOut(auth);
+    await signOut(auth);
       // Ensure user state is cleared
       setCurrentUser(null);
       console.log("Logout successful");

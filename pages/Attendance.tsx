@@ -6,8 +6,13 @@ import db from '../services/db';
 import { SectionEntity, GroupEntity, EmployeeEntity, AttendanceRecordEntity, AttendanceData } from '../types';
 import Select from '../components/ui/Select';
 import AttendanceCell, { AttendanceStatus } from '../components/ui/AttendanceCell';
+import { useAuth } from '../context/AuthContext';
+import { canUserEditPage } from '../services/permissionService';
 
 const Attendance: React.FC = () => {
+  const { currentUser } = useAuth();
+  const [canEdit, setCanEdit] = useState(false);
+  
   // Modal State
   const [activeModal, setActiveModal] = useState<'create' | 'edit' | 'view' | 'delete' | null>(null);
 
@@ -44,7 +49,15 @@ const Attendance: React.FC = () => {
 
   useEffect(() => {
     loadInitialData();
-  }, []);
+    checkPermissions();
+  }, [currentUser]);
+
+  const checkPermissions = async () => {
+    if (currentUser?.uid) {
+      const hasEdit = await canUserEditPage(currentUser.uid, 'attendance');
+      setCanEdit(hasEdit);
+    }
+  };
   
   const loadInitialData = async () => {
     setIsLoading(true);
@@ -304,7 +317,9 @@ const Attendance: React.FC = () => {
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Track employee attendance and generate reports.</p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={handleOpenCreate} icon={<Plus size={16} />}>Mark Attendance</Button>
+          {canEdit && (
+            <Button onClick={handleOpenCreate} icon={<Plus size={16} />}>Mark Attendance</Button>
+          )}
         </div>
       </div>
       
@@ -407,14 +422,16 @@ const Attendance: React.FC = () => {
                         >
                           View
                         </Button>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => handleOpenDelete(rec)}
-                          className="bg-red-500 bg-opacity-20 text-red-700 hover:bg-red-600 hover:bg-opacity-30 dark:bg-red-400 dark:bg-opacity-20 dark:text-red-300 dark:hover:bg-red-500 dark:hover:bg-opacity-30"
-                        >
-                          <Trash2 size={16} />
-                        </Button>
+                        {canEdit && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleOpenDelete(rec)}
+                            className="bg-red-500 bg-opacity-20 text-red-700 hover:bg-red-600 hover:bg-opacity-30 dark:bg-red-400 dark:bg-opacity-20 dark:text-red-300 dark:hover:bg-red-500 dark:hover:bg-opacity-30"
+                          >
+                            <Trash2 size={16} />
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -597,7 +614,9 @@ const Attendance: React.FC = () => {
           </div>
           <div className="mt-5 flex justify-end gap-3 border-t border-gray-100 dark:border-gray-700 pt-4">
             <Button type="button" variant="secondary" onClick={handleCloseModal}>Close</Button>
-            <Button type="button" onClick={handleChangeFromView}>Change</Button>
+            {canEdit && (
+              <Button type="button" onClick={handleChangeFromView}>Change</Button>
+            )}
           </div>
         </Modal>
       )}

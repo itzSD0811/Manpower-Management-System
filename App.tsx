@@ -10,14 +10,22 @@ import SystemConfig from './pages/SystemConfig';
 import GenerateFiles from './pages/GenerateFiles';
 import Attendance from './pages/Attendance';
 import Prepayments from './pages/Prepayments';
+import Profile from './pages/Profile';
+import UserManagement from './pages/UserManagement';
+import RolesManagement from './pages/RolesManagement';
+import PermissionGuard from './components/PermissionGuard';
 import { useAuth } from './context/AuthContext';
 import LoginModal from './components/ui/LoginModal';
 import SetupRequired from './components/ui/SetupRequired';
+import LoadingScreen from './components/ui/LoadingScreen';
 import { loadConfig, loadConfigSync } from './services/configService';
 
 const App: React.FC = () => {
   const { currentUser, loading, isFirebaseConfigured, dbType } = useAuth();
   const [recaptchaSiteKey, setRecaptchaSiteKey] = useState<string>('');
+  const [configLoading, setConfigLoading] = useState(true);
+  const [showLoading, setShowLoading] = useState(true);
+  const [startTime] = useState(Date.now());
 
   useEffect(() => {
     const loadRecaptchaConfig = async () => {
@@ -38,32 +46,58 @@ const App: React.FC = () => {
         } else {
           setRecaptchaSiteKey('');
         }
+      } finally {
+        setConfigLoading(false);
       }
     };
     loadRecaptchaConfig();
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-gray-100 dark:bg-gray-900">
-        <div className="text-lg font-medium text-gray-700 dark:text-gray-300">Loading Application...</div>
-      </div>
-    );
+  // Ensure loading screen shows for minimum 3 seconds
+  useEffect(() => {
+    const checkLoading = () => {
+      const elapsed = Date.now() - startTime;
+      const minDisplayTime = 3000; // 3 seconds
+
+      if (!loading && !configLoading) {
+        // Both loading states are complete
+        if (elapsed >= minDisplayTime) {
+          // Minimum time has passed, hide loading screen
+          setShowLoading(false);
+        } else {
+          // Wait for remaining time
+          const remainingTime = minDisplayTime - elapsed;
+          setTimeout(() => {
+            setShowLoading(false);
+          }, remainingTime);
+        }
+      }
+    };
+
+    checkLoading();
+  }, [loading, configLoading, startTime]);
+
+  if (showLoading) {
+    return <LoadingScreen message="Initializing Application..." />;
   }
 
   const AppRouter = () => (
     <HashRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="employees" element={<EmployeeManagement />} />
-          <Route path="attendance" element={<Attendance />} />
-          <Route path="prepayments" element={<Prepayments />} />
-          <Route path="sections" element={<SectionManagement />} />
-          <Route path="groups" element={<GroupManagement />} />
-          <Route path="files" element={<GenerateFiles />} />
-          <Route path="settings" element={<SystemConfig />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route index element={<Navigate to="/profile" replace />} />
+          <Route path="dashboard" element={<PermissionGuard pageId="dashboard"><Dashboard /></PermissionGuard>} />
+          <Route path="profile" element={<PermissionGuard pageId="profile"><Profile /></PermissionGuard>} />
+          <Route path="employees" element={<PermissionGuard pageId="employees"><EmployeeManagement /></PermissionGuard>} />
+          <Route path="attendance" element={<PermissionGuard pageId="attendance"><Attendance /></PermissionGuard>} />
+          <Route path="prepayments" element={<PermissionGuard pageId="prepayments"><Prepayments /></PermissionGuard>} />
+          <Route path="sections" element={<PermissionGuard pageId="sections"><SectionManagement /></PermissionGuard>} />
+          <Route path="groups" element={<PermissionGuard pageId="groups"><GroupManagement /></PermissionGuard>} />
+          <Route path="files" element={<PermissionGuard pageId="files"><GenerateFiles /></PermissionGuard>} />
+          <Route path="settings" element={<PermissionGuard pageId="settings"><SystemConfig /></PermissionGuard>} />
+          <Route path="users" element={<PermissionGuard pageId="settings" requireEdit><UserManagement /></PermissionGuard>} />
+          <Route path="roles" element={<PermissionGuard pageId="settings" requireEdit><RolesManagement /></PermissionGuard>} />
+          <Route path="*" element={<Navigate to="/profile" replace />} />
         </Route>
       </Routes>
     </HashRouter>

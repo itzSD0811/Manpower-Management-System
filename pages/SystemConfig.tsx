@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Flame, CheckCircle, Server, Activity, AlertTriangle, ShieldAlert, LogOut, Database, HelpCircle, Download, Upload, Shield, QrCode, Key, X } from 'lucide-react';
+import { Flame, CheckCircle, Server, Activity, AlertTriangle, ShieldAlert, Database, HelpCircle, Download, Upload, X, Pencil, Lock, Save, Shield, Users } from 'lucide-react';
 import * as firebase from '../services/firebaseDataService';
 import * as mysql from '../services/mysqlDataService';
-import { saveConfig, loadConfig, loadConfigSync, AppConfig } from '../services/configService';
+import { saveConfig, loadConfig, loadConfigSync, AppConfig, verifyConfigPassword } from '../services/configService';
 import { MysqlConfig, FirebaseConfig, RecaptchaConfig } from '../types';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -14,7 +14,6 @@ import * as twoFactorService from '../services/twoFactorService';
 import Modal from '../components/ui/Modal';
 
 const SystemConfig: React.FC = () => {
-  const { logout } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // DB Selection State
@@ -44,20 +43,119 @@ const SystemConfig: React.FC = () => {
   const [diagMessage, setDiagMessage] = useState('');
   const [mysqlDiagStatus, setMysqlDiagStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
   const [mysqlDiagMessage, setMysqlDiagMessage] = useState('');
+  
+  // System Stats State
+  const [systemStats, setSystemStats] = useState<{
+    userCount: number;
+    roleCount: number;
+    activeUsers: number;
+  } | null>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
 
   // Restore State
   const [restoreStatus, setRestoreStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
   const [restoreMessage, setRestoreMessage] = useState('');
 
-  // 2FA State
+  // 2FA State (only for config password verification)
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
-  const [twoFactorLoading, setTwoFactorLoading] = useState(false);
-  const [qrCodeModalOpen, setQrCodeModalOpen] = useState(false);
-  const [qrCodeData, setQrCodeData] = useState<{ qrCode: string; secret: string; manualEntryKey: string } | null>(null);
-  const [verificationCode, setVerificationCode] = useState('');
-  const [twoFactorError, setTwoFactorError] = useState('');
-  const [twoFactorSuccess, setTwoFactorSuccess] = useState('');
   const [recaptchaError, setRecaptchaError] = useState('');
+
+  // Config Edit States
+  const [isEditingFirebase, setIsEditingFirebase] = useState(false);
+  const [isEditingMysql, setIsEditingMysql] = useState(false);
+  const [firebaseConfigBackup, setFirebaseConfigBackup] = useState<FirebaseConfig | null>(null);
+  const [mysqlConfigBackup, setMysqlConfigBackup] = useState<MysqlConfig | null>(null);
+
+  // Password Protection States
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [configPassword, setConfigPassword] = useState('');
+  const [configPasswordError, setConfigPasswordError] = useState('');
+  const [require2FA, setRequire2FA] = useState(() => {
+    // Load from sessionStorage on mount
+    const stored = sessionStorage.getItem('config_require_2fa');
+    return stored === 'true';
+  });
+  const [config2FAToken, setConfig2FAToken] = useState('');
+  const [config2FAError, setConfig2FAError] = useState('');
+  const [failedPasswordAttempts, setFailedPasswordAttempts] = useState(() => {
+    // Load from sessionStorage on mount
+    const stored = sessionStorage.getItem('config_failed_attempts');
+    return stored ? parseInt(stored, 10) : 0;
+  });
+  const [lockoutUntil, setLockoutUntil] = useState<number | null>(() => {
+    // Load lockout timestamp from sessionStorage
+    const stored = sessionStorage.getItem('config_lockout_until');
+    if (stored) {
+      const timestamp = parseInt(stored, 10);
+      // If lockout has expired, clear it
+      if (Date.now() < timestamp) {
+        return timestamp;
+      } else {
+        sessionStorage.removeItem('config_lockout_until');
+        return null;
+      }
+    }
+    return null;
+  });
+  const [remainingTime, setRemainingTime] = useState<number>(0);
+  const [pendingConfigAction, setPendingConfigAction] = useState<'edit-firebase' | 'edit-mysql' | 'save-config' | null>(null);
+
+  // Helper to update failed attempts and persist to sessionStorage
+  const updateFailedAttempts = (attempts: number) => {
+    setFailedPasswordAttempts(attempts);
+    sessionStorage.setItem('config_failed_attempts', attempts.toString());
+  };
+
+  // Helper to update require2FA and persist to sessionStorage
+  const updateRequire2FA = (require: boolean) => {
+    setRequire2FA(require);
+    sessionStorage.setItem('config_require_2fa', require.toString());
+  };
+
+  // Helper to set lockout
+  const setLockout = (minutes: number = 5) => {
+    const lockoutTimestamp = Date.now() + (minutes * 60 * 1000);
+    setLockoutUntil(lockoutTimestamp);
+    sessionStorage.setItem('config_lockout_until', lockoutTimestamp.toString());
+  };
+
+  // Helper to clear security state (only on successful verification)
+  const clearSecurityState = () => {
+    setRequire2FA(false);
+    setFailedPasswordAttempts(0);
+    setLockoutUntil(null);
+    sessionStorage.removeItem('config_require_2fa');
+    sessionStorage.removeItem('config_failed_attempts');
+    sessionStorage.removeItem('config_lockout_until');
+  };
+
+  // Check lockout status and update remaining time
+  useEffect(() => {
+    if (lockoutUntil) {
+      const updateRemainingTime = () => {
+        const now = Date.now();
+        const remaining = Math.max(0, lockoutUntil - now);
+        setRemainingTime(remaining);
+        
+        if (remaining <= 0) {
+          // Lockout expired, clear it
+          setLockoutUntil(null);
+          sessionStorage.removeItem('config_lockout_until');
+          setRequire2FA(false);
+          setFailedPasswordAttempts(0);
+          sessionStorage.removeItem('config_require_2fa');
+          sessionStorage.removeItem('config_failed_attempts');
+        }
+      };
+
+      updateRemainingTime();
+      const interval = setInterval(updateRemainingTime, 1000); // Update every second
+
+      return () => clearInterval(interval);
+    } else {
+      setRemainingTime(0);
+    }
+  }, [lockoutUntil]);
 
 
   // Load config from API on mount
@@ -93,94 +191,209 @@ const SystemConfig: React.FC = () => {
     };
     loadConfigData();
     load2FAStatus();
+    loadSystemStats();
   }, []);
+
+  // Load system statistics
+  const loadSystemStats = async () => {
+    setLoadingStats(true);
+    try {
+      const [users, roles] = await Promise.all([
+        getUsers().catch(() => []),
+        getRoles().catch(() => [])
+      ]);
+      
+      const activeUsers = users.filter(u => u.isActive).length;
+      
+      setSystemStats({
+        userCount: users.length,
+        roleCount: roles.length,
+        activeUsers: activeUsers,
+      });
+    } catch (error) {
+      console.error('Failed to load system stats:', error);
+    } finally {
+      setLoadingStats(false);
+    }
+  };
 
   // Load 2FA status
   const load2FAStatus = async () => {
     try {
       const status = await twoFactorService.get2FAStatus();
       setTwoFactorEnabled(status.enabled);
+      // If 2FA is not enabled but require2FA is set in sessionStorage, clear it
+      const storedRequire2FA = sessionStorage.getItem('config_require_2fa') === 'true';
+      if (!status.enabled && storedRequire2FA) {
+        clearSecurityState();
+      }
     } catch (error) {
       console.error('Failed to load 2FA status:', error);
     }
   };
 
-  // Generate 2FA secret and show QR code
-  const handleGenerate2FA = async () => {
-    setTwoFactorLoading(true);
-    setTwoFactorError('');
-    setTwoFactorSuccess('');
-    try {
-      const result = await twoFactorService.generate2FASecret();
-      setQrCodeData(result);
-      setQrCodeModalOpen(true);
-    } catch (error: any) {
-      setTwoFactorError(error.message || 'Failed to generate 2FA secret');
-    } finally {
-      setTwoFactorLoading(false);
-    }
+
+  // Handle Edit Firebase Config
+  const handleEditFirebase = () => {
+    setPendingConfigAction('edit-firebase');
+    setPasswordModalOpen(true);
   };
 
-  // Enable 2FA after verification
-  const handleEnable2FA = async () => {
-    if (!qrCodeData || !verificationCode) {
-      setTwoFactorError('Please enter the verification code');
+  // Handle Save Firebase Config
+  const handleSaveFirebase = () => {
+    setIsEditingFirebase(false);
+    setFirebaseConfigBackup(null);
+  };
+
+  // Handle Cancel Firebase Edit
+  const handleCancelFirebase = () => {
+    if (firebaseConfigBackup) {
+      setFirebaseConfig(firebaseConfigBackup);
+    }
+    setIsEditingFirebase(false);
+    setFirebaseConfigBackup(null);
+  };
+
+  // Handle Edit MySQL Config
+  const handleEditMysql = () => {
+    setPendingConfigAction('edit-mysql');
+    setPasswordModalOpen(true);
+  };
+
+  // Handle Save MySQL Config
+  const handleSaveMysql = () => {
+    setIsEditingMysql(false);
+    setMysqlConfigBackup(null);
+  };
+
+  // Handle Cancel MySQL Edit
+  const handleCancelMysql = () => {
+    if (mysqlConfigBackup) {
+      setMysqlConfig(mysqlConfigBackup);
+    }
+    setIsEditingMysql(false);
+    setMysqlConfigBackup(null);
+  };
+
+  // Handle Password Verification
+  const handleVerifyPassword = async () => {
+    setConfigPasswordError('');
+    setConfig2FAError('');
+
+    // Check if user is locked out
+    if (lockoutUntil && Date.now() < lockoutUntil) {
+      const remaining = Math.ceil((lockoutUntil - Date.now()) / 1000 / 60);
+      setConfigPasswordError(`Too many failed attempts. Please wait ${remaining} more minute(s) before trying again.`);
       return;
     }
 
-    setTwoFactorLoading(true);
-    setTwoFactorError('');
     try {
-      await twoFactorService.enable2FA(qrCodeData.secret, verificationCode);
-      setTwoFactorEnabled(true);
-      setTwoFactorSuccess('Two-factor authentication enabled successfully!');
-      setQrCodeModalOpen(false);
-      setVerificationCode('');
-      setQrCodeData(null);
-      setTimeout(() => setTwoFactorSuccess(''), 5000);
-    } catch (error: any) {
-      setTwoFactorError(error.message || 'Failed to enable 2FA');
-    } finally {
-      setTwoFactorLoading(false);
-    }
-  };
+      let verified = false;
 
-  // Disable 2FA confirmation modal state
-  const [disable2FAModalOpen, setDisable2FAModalOpen] = useState(false);
-  const [disable2FACode, setDisable2FACode] = useState('');
-  const [disable2FAError, setDisable2FAError] = useState('');
+      if (require2FA) {
+        // Verify 2FA token
+        const result = await verifyConfigPassword(undefined, config2FAToken);
+        verified = result;
+        if (!verified) {
+          setConfig2FAError('Invalid 2FA code');
+          return;
+        }
+      } else {
+        // Verify password
+        const result = await verifyConfigPassword(configPassword);
+        verified = result;
+        if (!verified) {
+          const newAttempts = failedPasswordAttempts + 1;
+          updateFailedAttempts(newAttempts);
+          
+          if (newAttempts >= 3) {
+            // Only require 2FA if it's actually enabled
+            if (twoFactorEnabled) {
+              updateRequire2FA(true);
+              setConfigPasswordError('Too many failed attempts. Please enter your 2FA code.');
+            } else {
+              // If 2FA is not enabled, set lockout for 5 minutes
+              setLockout(5);
+              setConfigPasswordError(`Too many failed attempts. Account locked for 5 minutes. Please wait before trying again, or enable 2FA in Profile page for additional security.`);
+            }
+          } else {
+            setConfigPasswordError(`Invalid password. ${3 - newAttempts} attempt(s) remaining.`);
+          }
+          return;
+        }
+      }
 
-  // Disable 2FA
-  const handleDisable2FA = async () => {
-    if (!disable2FACode || disable2FACode.length !== 6) {
-      setDisable2FAError('Please enter a valid 6-digit code');
-      return;
-    }
-
-    setTwoFactorLoading(true);
-    setDisable2FAError('');
-    setTwoFactorError('');
-    setTwoFactorSuccess('');
-    
-    try {
-      // First verify the 2FA code
-      await twoFactorService.verify2FA(disable2FACode);
+      // Password/2FA verified, proceed with action
+      // Save the password/token values before clearing (needed for performSaveConfig)
+      const passwordValue = require2FA ? undefined : configPassword;
+      const tokenValue = require2FA ? config2FAToken : undefined;
       
-      // If verification succeeds, disable 2FA
-      await twoFactorService.disable2FA(disable2FACode);
-      setTwoFactorEnabled(false);
-      setDisable2FAModalOpen(false);
-      setDisable2FACode('');
-      setTwoFactorSuccess('Two-factor authentication disabled successfully');
-      setTimeout(() => setTwoFactorSuccess(''), 5000);
+      // Clear security state on successful verification
+      clearSecurityState();
+      
+      if (pendingConfigAction === 'edit-firebase') {
+        setFirebaseConfigBackup({ ...firebaseConfig });
+        setIsEditingFirebase(true);
+        // Reset modal states (but keep security state cleared)
+        setPasswordModalOpen(false);
+        setConfigPassword('');
+        setConfig2FAToken('');
+        setConfigPasswordError('');
+        setConfig2FAError('');
+        setPendingConfigAction(null);
+      } else if (pendingConfigAction === 'edit-mysql') {
+        setMysqlConfigBackup({ ...mysqlConfig });
+        setIsEditingMysql(true);
+        // Reset modal states (but keep security state cleared)
+        setPasswordModalOpen(false);
+        setConfigPassword('');
+        setConfig2FAToken('');
+        setConfigPasswordError('');
+        setConfig2FAError('');
+        setPendingConfigAction(null);
+      } else if (pendingConfigAction === 'save-config') {
+        // Save config with verified password/token (using saved values)
+        await performSaveConfig(passwordValue, tokenValue);
+        // Reset modal states (but keep security state cleared)
+        setPasswordModalOpen(false);
+        setConfigPassword('');
+        setConfig2FAToken('');
+        setConfigPasswordError('');
+        setConfig2FAError('');
+        setPendingConfigAction(null);
+      }
     } catch (error: any) {
-      setDisable2FAError(error.message || 'Failed to disable 2FA. Please check your code.');
-    } finally {
-      setTwoFactorLoading(false);
+      if (require2FA) {
+        setConfig2FAError(error.message || 'Invalid 2FA code');
+      } else {
+        const newAttempts = failedPasswordAttempts + 1;
+        updateFailedAttempts(newAttempts);
+        
+        if (newAttempts >= 3) {
+          // Only require 2FA if it's actually enabled
+          if (twoFactorEnabled) {
+            updateRequire2FA(true);
+            setConfigPasswordError('Too many failed attempts. Please enter your 2FA code.');
+          } else {
+            // If 2FA is not enabled, set lockout for 5 minutes
+            setLockout(5);
+            setConfigPasswordError(`Too many failed attempts. Account locked for 5 minutes. Please wait before trying again, or enable 2FA in Profile page for additional security.`);
+          }
+        } else {
+          setConfigPasswordError(error.message || `Invalid password. ${3 - newAttempts} attempt(s) remaining.`);
+        }
+      }
     }
   };
 
+  // Handle Save Configuration (requires password)
   const handleSaveConfig = async () => {
+    setPendingConfigAction('save-config');
+    setPasswordModalOpen(true);
+  };
+
+  // Actually save config after password verification
+  const performSaveConfig = async (password?: string, token?: string) => {
     const newConfig: AppConfig = {
       dbType: dbSelection,
       mysqlConfig: mysqlConfig,
@@ -188,7 +401,7 @@ const SystemConfig: React.FC = () => {
       recaptchaConfig: recaptchaConfig,
     };
     try {
-      await saveConfig(newConfig);
+      await saveConfig(newConfig, password, token);
       setSaveSuccess(true);
       setTimeout(() => {
           setSaveSuccess(false);
@@ -237,18 +450,6 @@ const SystemConfig: React.FC = () => {
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      console.log("Logout button clicked");
-      await logout();
-      // Force page reload to ensure clean state - redirect to home
-      window.location.href = '/#/';
-    } catch (error: any) {
-      console.error("Failed to log out", error);
-      // Even if logout fails, redirect to force clean state
-      window.location.href = '/#/';
-    }
-  };
 
   const handleBackup = () => {
     window.location.href = 'http://localhost:3001/api/mysql-backup';
@@ -303,9 +504,19 @@ const SystemConfig: React.FC = () => {
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="mb-6 flex items-center justify-between">
+        <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">System Configuration</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage external cloud database connection and user session.</p>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="secondary" onClick={() => window.location.href = '#/users'} icon={<Users size={16} />}>
+            Manage Users
+          </Button>
+          <Button variant="secondary" onClick={() => window.location.href = '#/roles'} icon={<Shield size={16} />}>
+            Manage Roles
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -369,6 +580,7 @@ const SystemConfig: React.FC = () => {
             {dbSelection === 'mysql' && (
                 <div className="bg-white dark:bg-gray-800 shadow rounded-lg border border-gray-200 dark:border-gray-700">
                     <div className="p-6 border-b border-gray-100 dark:border-gray-700">
+                      <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                           <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
                               <Server className="text-blue-600 dark:text-blue-400" size={24} />
@@ -378,13 +590,102 @@ const SystemConfig: React.FC = () => {
                               <p className="text-sm text-gray-500 dark:text-gray-400">Connection details for your MySQL server.</p>
                           </div>
                       </div>
+                        {!isEditingMysql ? (
+                          <Button 
+                            variant="secondary" 
+                            size="sm" 
+                            onClick={handleEditMysql} 
+                            icon={<Pencil size={14} />}
+                            className="!bg-blue-600 !hover:bg-blue-700 !text-white !border-blue-600 dark:!bg-blue-500 dark:!hover:bg-blue-600 dark:!border-blue-500 dark:!text-white"
+                          >
+                            Edit
+                          </Button>
+                        ) : (
+                          <div className="flex gap-2">
+                            <Button variant="secondary" size="sm" onClick={handleCancelMysql}>
+                              Cancel
+                            </Button>
+                            <Button variant="primary" size="sm" onClick={handleSaveMysql} icon={<Save size={14} />}>
+                              Save
+                            </Button>
                     </div>
-                    <div className="p-6 space-y-4">
-                        <Input label="Host" placeholder="localhost" value={mysqlConfig.host || ''} onChange={(e) => setMysqlConfig({...mysqlConfig, host: e.target.value})} />
-                        <Input label="Port" placeholder="3306" type="number" value={mysqlConfig.port || ''} onChange={(e) => setMysqlConfig({...mysqlConfig, port: Number(e.target.value)})} />
-                        <Input label="Database" placeholder="dns_manpower" value={mysqlConfig.database || ''} onChange={(e) => setMysqlConfig({...mysqlConfig, database: e.target.value})} />
-                        <Input label="User" placeholder="root" value={mysqlConfig.user || ''} onChange={(e) => setMysqlConfig({...mysqlConfig, user: e.target.value})} />
-                        <Input label="Password" type="password" value={mysqlConfig.password || ''} onChange={(e) => setMysqlConfig({...mysqlConfig, password: e.target.value})} />
+                        )}
+                      </div>
+                    </div>
+                    <div className="p-6 space-y-4 relative">
+                        <div className={`space-y-4 ${!isEditingMysql ? 'pointer-events-none opacity-75' : ''}`}>
+                          <div className="relative group">
+                            <Input 
+                              label="Host" 
+                              placeholder="localhost" 
+                              value={mysqlConfig.host || ''} 
+                              onChange={(e) => setMysqlConfig({...mysqlConfig, host: e.target.value})}
+                              readOnly={!isEditingMysql}
+                            />
+                            {!isEditingMysql && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="relative group">
+                            <Input 
+                              label="Port" 
+                              placeholder="3306" 
+                              type="number" 
+                              value={mysqlConfig.port || ''} 
+                              onChange={(e) => setMysqlConfig({...mysqlConfig, port: Number(e.target.value)})}
+                              readOnly={!isEditingMysql}
+                            />
+                            {!isEditingMysql && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="relative group">
+                            <Input 
+                              label="Database" 
+                              placeholder="dns_manpower" 
+                              value={mysqlConfig.database || ''} 
+                              onChange={(e) => setMysqlConfig({...mysqlConfig, database: e.target.value})}
+                              readOnly={!isEditingMysql}
+                            />
+                            {!isEditingMysql && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="relative group">
+                            <Input 
+                              label="User" 
+                              placeholder="root" 
+                              value={mysqlConfig.user || ''} 
+                              onChange={(e) => setMysqlConfig({...mysqlConfig, user: e.target.value})}
+                              readOnly={!isEditingMysql}
+                            />
+                            {!isEditingMysql && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="relative group">
+                            <Input 
+                              label="Password" 
+                              type="password" 
+                              value={mysqlConfig.password || ''} 
+                              onChange={(e) => setMysqlConfig({...mysqlConfig, password: e.target.value})}
+                              readOnly={!isEditingMysql}
+                            />
+                            {!isEditingMysql && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                              </div>
+                            )}
+                          </div>
+                        </div>
                         
                         <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-2">
                             <h3 className="text-md font-medium text-gray-800 dark:text-gray-200 mb-2">Backup & Restore</h3>
@@ -428,18 +729,120 @@ const SystemConfig: React.FC = () => {
                                 <p className="text-sm text-gray-500 dark:text-gray-400">Connection details for your Firebase project.</p>
                             </div>
                         </div>
+                        <div className="flex items-center gap-2">
+                          {!isEditingFirebase ? (
+                            <Button 
+                              variant="secondary" 
+                              size="sm" 
+                              onClick={handleEditFirebase} 
+                              icon={<Pencil size={14} />}
+                              className="!bg-blue-600 !hover:bg-blue-700 !text-white !border-blue-600 dark:!bg-blue-500 dark:!hover:bg-blue-600 dark:!border-blue-500 dark:!text-white"
+                            >
+                              Edit
+                            </Button>
+                          ) : (
+                            <div className="flex gap-2">
+                              <Button variant="secondary" size="sm" onClick={handleCancelFirebase}>
+                                Cancel
+                              </Button>
+                              <Button variant="primary" size="sm" onClick={handleSaveFirebase} icon={<Save size={14} />}>
+                                Save
+                              </Button>
+                            </div>
+                          )}
                         <Button variant="secondary" size="sm" onClick={() => setIsTutorialOpen(true)} icon={<HelpCircle size={14} />}>
                           How to setup?
                         </Button>
                       </div>
                     </div>
-                    <div className="p-6 space-y-4">
-                        <Input label="Project ID" placeholder="my-project-id" value={firebaseConfig.projectId || ''} onChange={(e) => setFirebaseConfig({...firebaseConfig, projectId: e.target.value})} />
-                        <Input label="API Key" type="password" value={firebaseConfig.apiKey || ''} onChange={(e) => setFirebaseConfig({...firebaseConfig, apiKey: e.target.value})} />
-                        <Input label="Auth Domain" placeholder="my-project.firebaseapp.com" value={firebaseConfig.authDomain || ''} onChange={(e) => setFirebaseConfig({...firebaseConfig, authDomain: e.target.value})} />
-                        <Input label="Storage Bucket" placeholder="my-project.appspot.com" value={firebaseConfig.storageBucket || ''} onChange={(e) => setFirebaseConfig({...firebaseConfig, storageBucket: e.target.value})} />
-                        <Input label="Messaging Sender ID" placeholder="1234567890" value={firebaseConfig.messagingSenderId || ''} onChange={(e) => setFirebaseConfig({...firebaseConfig, messagingSenderId: e.target.value})} />
-                        <Input label="App ID" type="password" value={firebaseConfig.appId || ''} onChange={(e) => setFirebaseConfig({...firebaseConfig, appId: e.target.value})} />
+                    </div>
+                    <div className="p-6 space-y-4 relative">
+                        <div className={`space-y-4 ${!isEditingFirebase ? 'pointer-events-none opacity-75' : ''}`}>
+                          <div className="relative group">
+                            <Input 
+                              label="Project ID" 
+                              placeholder="my-project-id" 
+                              value={firebaseConfig.projectId || ''} 
+                              onChange={(e) => setFirebaseConfig({...firebaseConfig, projectId: e.target.value})}
+                              readOnly={!isEditingFirebase}
+                            />
+                            {!isEditingFirebase && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="relative group">
+                            <Input 
+                              label="API Key" 
+                              type="password" 
+                              value={firebaseConfig.apiKey || ''} 
+                              onChange={(e) => setFirebaseConfig({...firebaseConfig, apiKey: e.target.value})}
+                              readOnly={!isEditingFirebase}
+                            />
+                            {!isEditingFirebase && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="relative group">
+                            <Input 
+                              label="Auth Domain" 
+                              placeholder="my-project.firebaseapp.com" 
+                              value={firebaseConfig.authDomain || ''} 
+                              onChange={(e) => setFirebaseConfig({...firebaseConfig, authDomain: e.target.value})}
+                              readOnly={!isEditingFirebase}
+                            />
+                            {!isEditingFirebase && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="relative group">
+                            <Input 
+                              label="Storage Bucket" 
+                              placeholder="my-project.appspot.com" 
+                              value={firebaseConfig.storageBucket || ''} 
+                              onChange={(e) => setFirebaseConfig({...firebaseConfig, storageBucket: e.target.value})}
+                              readOnly={!isEditingFirebase}
+                            />
+                            {!isEditingFirebase && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="relative group">
+                            <Input 
+                              label="Messaging Sender ID" 
+                              placeholder="1234567890" 
+                              value={firebaseConfig.messagingSenderId || ''} 
+                              onChange={(e) => setFirebaseConfig({...firebaseConfig, messagingSenderId: e.target.value})}
+                              readOnly={!isEditingFirebase}
+                            />
+                            {!isEditingFirebase && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="relative group">
+                            <Input 
+                              label="App ID" 
+                              type="password" 
+                              value={firebaseConfig.appId || ''} 
+                              onChange={(e) => setFirebaseConfig({...firebaseConfig, appId: e.target.value})}
+                              readOnly={!isEditingFirebase}
+                            />
+                            {!isEditingFirebase && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                              </div>
+                            )}
+                          </div>
+                        </div>
                     </div>
                 </div>
             )}
@@ -552,85 +955,6 @@ const SystemConfig: React.FC = () => {
                 </div>
             </div>
 
-            {/* Two-Factor Authentication Card */}
-            <div className="bg-white dark:bg-gray-800 shadow rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden transition-colors duration-200">
-                <div className="p-6 border-b border-gray-100 dark:border-gray-700">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3 flex-1">
-                            <div className="p-2 bg-green-50 dark:bg-green-900/30 rounded-lg">
-                                <Shield className="text-green-600 dark:text-green-400" size={24} />
-                            </div>
-                            <div className="flex-1">
-                                <h2 className="text-lg font-medium text-gray-900 dark:text-white">Two-Factor Authentication</h2>
-                                <p className="text-sm text-gray-500 dark:text-gray-400">Add an extra layer of security to your account.</p>
-                            </div>
-                        </div>
-                        {/* Toggle Switch */}
-                        <div className="flex items-center">
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    if (twoFactorEnabled) {
-                                        setDisable2FAModalOpen(true);
-                                    } else {
-                                        handleGenerate2FA();
-                                    }
-                                }}
-                                disabled={twoFactorLoading}
-                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-dns-red focus:ring-offset-2 ${
-                                    twoFactorEnabled ? 'bg-green-600' : 'bg-gray-200 dark:bg-gray-600'
-                                } ${twoFactorLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                role="switch"
-                                aria-checked={twoFactorEnabled}
-                            >
-                                <span
-                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                        twoFactorEnabled ? 'translate-x-5' : 'translate-x-0'
-                                    }`}
-                                />
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div className="p-6 space-y-4">
-                    {twoFactorSuccess && (
-                        <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg text-green-700 dark:text-green-300 text-sm">
-                            {twoFactorSuccess}
-                        </div>
-                    )}
-                    {twoFactorError && (
-                        <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
-                            {twoFactorError}
-                        </div>
-                    )}
-                    
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-sm font-medium text-gray-900 dark:text-white">
-                                Status: <span className={twoFactorEnabled ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}>
-                                    {twoFactorEnabled ? 'Enabled' : 'Disabled'}
-                                </span>
-                            </p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                {twoFactorEnabled 
-                                    ? 'Your account is protected with two-factor authentication'
-                                    : 'Enable 2FA to require a verification code from Google Authenticator'}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Logout Card */}
-            <div className="bg-white dark:bg-gray-800 shadow rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden transition-colors duration-200">
-                <div className="p-6">
-                    <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Account Actions</h2>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Log out from your current session.</p>
-                    <Button onClick={handleLogout} variant="danger" icon={<LogOut size={16}/>}>
-                        Logout
-                    </Button>
-                </div>
-            </div>
         </div>
 
         {/* Diagnostics Panel */}
@@ -641,7 +965,32 @@ const SystemConfig: React.FC = () => {
                         <Activity size={18} /> Diagnostics
                     </h3>
                 </div>
-                <div className="p-6 flex flex-col items-center text-center">
+                <div className="p-6">
+                    {/* System Statistics */}
+                    {systemStats && (
+                        <div className="mb-6 space-y-3">
+                            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">System Overview</h4>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 border border-blue-200 dark:border-blue-800">
+                                    <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{systemStats.userCount}</div>
+                                    <div className="text-xs text-blue-700 dark:text-blue-300 mt-1">Total Users</div>
+                                </div>
+                                <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
+                                    <div className="text-2xl font-bold text-green-600 dark:text-green-400">{systemStats.activeUsers}</div>
+                                    <div className="text-xs text-green-700 dark:text-green-300 mt-1">Active Users</div>
+                                </div>
+                                <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 border border-purple-200 dark:border-purple-800 col-span-2">
+                                    <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{systemStats.roleCount}</div>
+                                    <div className="text-xs text-purple-700 dark:text-purple-300 mt-1">Roles Defined</div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Database Connection Test */}
+                    <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Connection Test</h4>
+                        <div className="flex flex-col items-center text-center">
                     {dbSelection === 'firebase' ? (
                         <>
                             {diagStatus === 'idle' && (
@@ -735,6 +1084,33 @@ const SystemConfig: React.FC = () => {
                             )}
                         </>
                     )}
+                        </div>
+                    </div>
+
+                    {/* Quick Actions */}
+                    <div className="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
+                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Quick Actions</h4>
+                        <div className="space-y-2">
+                            <Button 
+                                variant="secondary" 
+                                size="sm" 
+                                onClick={() => window.location.href = '#/users'}
+                                className="w-full justify-start"
+                                icon={<Users size={16} />}
+                            >
+                                Manage Users
+                            </Button>
+                            <Button 
+                                variant="secondary" 
+                                size="sm" 
+                                onClick={() => window.location.href = '#/roles'}
+                                className="w-full justify-start"
+                                icon={<Shield size={16} />}
+                            >
+                                Manage Roles
+                            </Button>
+                        </div>
+                    </div>
                 </div>
 
                 {/* Firestore Rules Help */}
@@ -764,173 +1140,145 @@ service cloud.firestore {
       <FirebaseSetupGuide isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
       <RecaptchaSetupGuide isOpen={isRecaptchaTutorialOpen} onClose={() => setIsRecaptchaTutorialOpen(false)} />
       
-      {/* 2FA QR Code Modal */}
-      <Modal isOpen={qrCodeModalOpen} onClose={() => {
-        setQrCodeModalOpen(false);
-        setVerificationCode('');
-        setTwoFactorError('');
-      }} title="Enable Two-Factor Authentication" size="md">
+      {/* Configuration Password Modal */}
+      <Modal isOpen={passwordModalOpen} onClose={() => {
+        // Only clear input fields and errors, but keep security state (failed attempts, require2FA)
+        setPasswordModalOpen(false);
+        setConfigPassword('');
+        setConfig2FAToken('');
+        setConfigPasswordError('');
+        setConfig2FAError('');
+        setPendingConfigAction(null);
+      }} title={require2FA ? "Enter 2FA Code" : "Enter Configuration Password"} size="md">
         <div className="space-y-4">
           <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
             <p className="text-sm text-blue-800 dark:text-blue-200">
-              <strong>Step 1:</strong> Scan this QR code with Google Authenticator app on your phone.
+              {require2FA 
+                ? "Too many failed password attempts. Please enter your 2FA code to continue."
+                : pendingConfigAction === 'save-config'
+                  ? "Enter your configuration password to save the current settings."
+                  : "Enter your configuration password to edit configuration settings."
+              }
             </p>
           </div>
 
-          {qrCodeData && (
-            <>
-              <div className="flex justify-center p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <img src={qrCodeData.qrCode} alt="QR Code" className="w-64 h-64" />
-              </div>
-
-              <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                <p className="text-xs text-gray-600 dark:text-gray-400 mb-2 font-medium">Can't scan? Enter this code manually:</p>
-                <div className="space-y-2">
-                  <div className="bg-white dark:bg-gray-800 px-3 py-2 rounded border border-gray-300 dark:border-gray-600">
-                    <code className="text-xs font-mono text-gray-900 dark:text-white break-all select-all">
-                      {qrCodeData.manualEntryKey}
-                    </code>
-                  </div>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(qrCodeData.manualEntryKey);
-                      setTwoFactorSuccess('Secret key copied to clipboard!');
-                      setTimeout(() => setTwoFactorSuccess(''), 3000);
-                    }}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 rounded transition-colors"
-                    title="Copy to clipboard"
-                  >
-                    <Key size={14} />
-                    <span>Copy Secret Key</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-                <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                  <strong>Step 2:</strong> Enter the 6-digit code from Google Authenticator to verify and enable 2FA.
+          {/* Show lockout message if locked out */}
+          {lockoutUntil && Date.now() < lockoutUntil && (
+            <div className="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-200 px-4 py-3 rounded relative flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5" />
+              <div className="flex-1">
+                <span className="font-medium">Too many failed attempts. Account temporarily locked.</span>
+                <p className="text-sm mt-1">
+                  Please wait <strong>{Math.ceil(remainingTime / 1000 / 60)}</strong> minute(s) and <strong>{Math.ceil((remainingTime / 1000) % 60)}</strong> second(s) before trying again.
+                  {!twoFactorEnabled && ' Or enable 2FA in Profile page for additional security.'}
                 </p>
               </div>
+            </div>
+          )}
 
-              {twoFactorError && (
-                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
-                  {twoFactorError}
+          {/* Show error if 2FA is required but not enabled */}
+          {require2FA && !twoFactorEnabled && !lockoutUntil && (
+            <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded relative flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5" />
+              <span className="font-medium">2FA is not enabled. Please wait a few minutes before trying again, or enable 2FA in Profile page for additional security.</span>
+                  </div>
+          )}
+
+          {!require2FA && (!lockoutUntil || Date.now() >= lockoutUntil) ? (
+            <>
+              {configPasswordError && !lockoutUntil && (
+                <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded relative flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5" />
+                  <span className="font-medium">{configPasswordError}</span>
                 </div>
               )}
 
               <div>
                 <Input
-                  label="Verification Code"
+                  label="Configuration Password"
+                  type="password"
+                  placeholder="Enter password"
+                  value={configPassword}
+                  onChange={(e) => {
+                    setConfigPassword(e.target.value);
+                    setConfigPasswordError('');
+                  }}
+                  required
+                  autoFocus
+                  disabled={lockoutUntil !== null && Date.now() < lockoutUntil}
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  This password is set in the server's .env file (CONFIG_PASSWORD)
+                </p>
+              </div>
+            </>
+          ) : require2FA && !twoFactorEnabled ? (
+            <>
+              {/* Show message if 2FA is required but not enabled */}
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+                <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                  Too many failed password attempts. 2FA is not enabled in your Profile page. 
+                  Please wait a few minutes before trying again, or enable 2FA for additional security.
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              {config2FAError && (
+                <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded relative flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5" />
+                  <span className="font-medium">{config2FAError}</span>
+                </div>
+              )}
+
+              <div>
+                <Input
+                  label="2FA Code"
                   type="text"
+                  inputMode="numeric"
                   placeholder="000000"
-                  value={verificationCode}
+                  value={config2FAToken}
                   onChange={(e) => {
                     const value = e.target.value.replace(/\D/g, '').slice(0, 6);
-                    setVerificationCode(value);
-                    setTwoFactorError('');
+                    setConfig2FAToken(value);
+                    setConfig2FAError('');
                   }}
                   maxLength={6}
                   required
+                  autoFocus
                 />
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setQrCodeModalOpen(false);
-                    setVerificationCode('');
-                    setTwoFactorError('');
-                  }}
-                  disabled={twoFactorLoading}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleEnable2FA}
-                  isLoading={twoFactorLoading}
-                  disabled={verificationCode.length !== 6}
-                >
-                  Verify & Enable
-                </Button>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Enter the 6-digit code from your authenticator app
+                </p>
               </div>
             </>
           )}
-        </div>
-      </Modal>
-
-      {/* Disable 2FA Confirmation Modal */}
-      <Modal isOpen={disable2FAModalOpen} onClose={() => {
-        setDisable2FAModalOpen(false);
-        setDisable2FACode('');
-        setDisable2FAError('');
-      }} title="Disable Two-Factor Authentication" size="md">
-        <div className="space-y-4">
-          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 flex items-start gap-3">
-            <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">Security Warning</p>
-              <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
-                To disable two-factor authentication, please enter your 2FA code from your authenticator app. This will make your account less secure.
-              </p>
-            </div>
-          </div>
-
-          {disable2FAError && (
-            <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded relative flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
-              <span className="font-medium">{disable2FAError}</span>
-            </div>
-          )}
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Enter 2FA Code <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
-              value={disable2FACode}
-              onChange={(e) => {
-                const value = e.target.value.replace(/\D/g, '').slice(0, 6);
-                setDisable2FACode(value);
-                setDisable2FAError('');
-              }}
-              placeholder="000000"
-              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-dns-red focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-center text-2xl tracking-widest font-mono transition-all duration-200"
-              autoFocus
-            />
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
-              Enter the 6-digit code from your authenticator app
-            </p>
-          </div>
 
           <div className="flex gap-3 pt-2">
             <Button
               variant="secondary"
               onClick={() => {
-                setDisable2FAModalOpen(false);
-                setDisable2FACode('');
-                setDisable2FAError('');
+                // Only clear input fields and errors, but keep security state (failed attempts, require2FA)
+                setPasswordModalOpen(false);
+                setConfigPassword('');
+                setConfig2FAToken('');
+                setConfigPasswordError('');
+                setConfig2FAError('');
+                setPendingConfigAction(null);
               }}
-              disabled={twoFactorLoading}
               className="flex-1"
             >
               Cancel
             </Button>
             <Button
-              variant="danger"
-              onClick={handleDisable2FA}
-              isLoading={twoFactorLoading}
-              disabled={twoFactorLoading || disable2FACode.length !== 6}
-              icon={<X size={16} />}
+              onClick={handleVerifyPassword}
+              disabled={
+                (lockoutUntil !== null && Date.now() < lockoutUntil) ||
+                (require2FA ? (config2FAToken.length !== 6 || !twoFactorEnabled) : !configPassword)
+              }
               className="flex-1"
             >
-              Disable 2FA
+              Verify
             </Button>
           </div>
         </div>

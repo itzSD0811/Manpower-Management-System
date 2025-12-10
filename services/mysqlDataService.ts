@@ -4,8 +4,8 @@ const API_URL = 'http://localhost:3001/api';
 
 const request = async <T>(url: string, options?: RequestInit): Promise<T> => {
     try {
-        const response = await fetch(url, options);
-        if (!response.ok) {
+    const response = await fetch(url, options);
+    if (!response.ok) {
             let errorMessage = 'An unknown error occurred';
             try {
                 const error = await response.json();
@@ -14,7 +14,7 @@ const request = async <T>(url: string, options?: RequestInit): Promise<T> => {
                 errorMessage = `Server responded with status ${response.status}`;
             }
             throw new Error(errorMessage);
-        }
+    }
         // Handle responses that might be empty or have different content types
         const contentType = response.headers.get('content-type');
         if (contentType && contentType.includes('application/json')) {

@@ -7,12 +7,16 @@ import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import Modal from '../components/ui/Modal';
+import { useAuth } from '../context/AuthContext';
+import { canUserEditPage } from '../services/permissionService';
 
 const EmployeeManagement: React.FC = () => {
+  const { currentUser } = useAuth();
   const [employees, setEmployees] = useState<EmployeeEntity[]>([]);
   const [sections, setSections] = useState<SectionEntity[]>([]);
   const [groups, setGroups] = useState<GroupEntity[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
   
   // Filtering
   const [searchTerm, setSearchTerm] = useState('');
@@ -38,7 +42,15 @@ const EmployeeManagement: React.FC = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+    checkPermissions();
+  }, [currentUser]);
+
+  const checkPermissions = async () => {
+    if (currentUser?.uid) {
+      const hasEdit = await canUserEditPage(currentUser.uid, 'employees');
+      setCanEdit(hasEdit);
+    }
+  };
 
   const loadData = async () => {
     setIsLoading(true);
@@ -173,7 +185,9 @@ const EmployeeManagement: React.FC = () => {
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Register new staff and manage employee profiles.</p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={handleOpenCreate} icon={<Plus size={16} />}>Register Employee</Button>
+          {canEdit && (
+            <Button onClick={handleOpenCreate} icon={<Plus size={16} />}>Register Employee</Button>
+          )}
         </div>
       </div>
 
@@ -262,14 +276,16 @@ const EmployeeManagement: React.FC = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{emp.phoneNumber}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex justify-end gap-2">
-                        <button onClick={(e) => { e.stopPropagation(); handleOpenEdit(emp); }} className="text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 p-2 rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/50">
-                            <Edit size={16} />
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); handleOpenDelete(emp); }} className="text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 p-2 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50">
-                            <Trash2 size={16} />
-                        </button>
-                    </div>
+                    {canEdit && (
+                      <div className="flex justify-end gap-2">
+                          <button onClick={(e) => { e.stopPropagation(); handleOpenEdit(emp); }} className="text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 p-2 rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/50">
+                              <Edit size={16} />
+                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); handleOpenDelete(emp); }} className="text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 p-2 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50">
+                              <Trash2 size={16} />
+                          </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))

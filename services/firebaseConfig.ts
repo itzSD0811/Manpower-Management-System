@@ -52,7 +52,7 @@ if (firebaseConfig && firebaseConfig.projectId) {
     db = null;
   }
 } else {
-  console.warn("Firebase config not found or incomplete. Firebase services will be disabled.");
+    console.warn("Firebase config not found or incomplete. Firebase services will be disabled.");
 }
 
 // Export the potentially null services

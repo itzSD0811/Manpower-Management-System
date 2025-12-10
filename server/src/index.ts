@@ -7,8 +7,59 @@ import path from 'path';
 import fs from 'fs/promises';
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
+import admin from 'firebase-admin';
 
 dotenv.config();
+
+// Initialize Firebase Admin SDK
+let adminInitialized = false;
+const initializeFirebaseAdmin = async () => {
+  if (adminInitialized) return;
+  
+  try {
+    // Try to get Firebase config from environment or config file
+    const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+    const firebaseConfigPath = path.join(__dirname, '..', 'config.json');
+    
+    if (serviceAccountPath) {
+      // Use service account file if provided
+      const serviceAccount = require(path.resolve(serviceAccountPath));
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+      });
+      adminInitialized = true;
+      console.log('Firebase Admin SDK initialized with service account');
+    } else {
+      // Try to read from config.json
+      try {
+        const configData = await fs.readFile(firebaseConfigPath, 'utf-8');
+        const config = JSON.parse(configData);
+        
+        if (config.firebaseConfig && config.firebaseConfig.projectId) {
+          // Initialize with config from file
+          // Note: For production, you should use a service account JSON file
+          // This is a fallback that may not work for all operations
+          try {
+            admin.initializeApp({
+              projectId: config.firebaseConfig.projectId
+            });
+            adminInitialized = true;
+            console.log('Firebase Admin SDK initialized with project ID');
+          } catch (error) {
+            console.warn('Firebase Admin SDK initialization failed. User deletion from Auth will not work. Set FIREBASE_SERVICE_ACCOUNT_PATH in .env with path to service account JSON file.');
+          }
+        }
+      } catch (error) {
+        console.warn('Could not initialize Firebase Admin SDK. User deletion from Auth will not work.');
+      }
+    }
+  } catch (error) {
+    console.warn('Firebase Admin SDK not initialized. User deletion from Auth will not work:', error);
+  }
+};
+
+// Initialize on startup
+initializeFirebaseAdmin();
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -41,16 +92,30 @@ app.get('/api/config', async (req, res) => {
   try {
     const configData = await fs.readFile(CONFIG_FILE_PATH, 'utf-8');
     const config = JSON.parse(configData);
+    
+    // Override administratorEmail from .env if set
+    const adminEmail = process.env.ADMINISTRATOR_EMAIL;
+    if (adminEmail) {
+      config.administratorEmail = adminEmail;
+    }
+    
     res.json(config);
   } catch (error: any) {
     // If file doesn't exist, return default config
     if (error.code === 'ENOENT') {
-      const defaultConfig = {
+      const defaultConfig: any = {
         dbType: 'firebase',
         mysqlConfig: {},
         firebaseConfig: {},
         recaptchaConfig: {}
       };
+      
+      // Add administratorEmail from .env if set
+      const adminEmail = process.env.ADMINISTRATOR_EMAIL;
+      if (adminEmail) {
+        defaultConfig.administratorEmail = adminEmail;
+      }
+      
       res.json(defaultConfig);
     } else {
       console.error('Error reading config:', error);
@@ -59,22 +124,130 @@ app.get('/api/config', async (req, res) => {
   }
 });
 
+// Configuration Password Verification API
+app.post('/api/config/verify-password', async (req, res) => {
+  try {
+    const { password, token } = req.body;
+    const configPassword = process.env.CONFIG_PASSWORD;
+    
+    if (!configPassword) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Configuration password not set. Please set CONFIG_PASSWORD in .env file.' 
+      });
+    }
+
+    // If password is provided, verify it
+    if (password) {
+      if (password === configPassword) {
+        return res.json({ success: true, message: 'Password verified' });
+      } else {
+        return res.status(401).json({ success: false, message: 'Invalid password' });
+      }
+    }
+
+    // If token (2FA) is provided, verify it
+    if (token) {
+      // Get 2FA secret from config file (login is always handled by Firebase)
+      try {
+        const config = await readConfig();
+        
+        if (!config.twoFactorAuth || !config.twoFactorAuth.enabled || !config.twoFactorAuth.secret) {
+          return res.status(400).json({ success: false, message: '2FA not enabled' });
+        }
+
+        const secret = config.twoFactorAuth.secret;
+        const verified = speakeasy.totp.verify({
+          secret: secret,
+          encoding: 'base32',
+          token: token,
+          window: 2
+        });
+
+        if (verified) {
+          return res.json({ success: true, message: '2FA verified' });
+        } else {
+          return res.status(401).json({ success: false, message: 'Invalid 2FA code' });
+        }
+      } catch (error: any) {
+        console.error('Error reading config for 2FA verification:', error);
+        // Make sure we don't accidentally query MySQL - return error instead
+        return res.status(500).json({ 
+          success: false, 
+          message: error.message || 'Failed to verify 2FA. Please ensure 2FA is enabled in system configuration.' 
+        });
+      }
+    }
+
+    return res.status(400).json({ success: false, message: 'Password or token required' });
+  } catch (error: any) {
+    console.error('Error verifying password:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // Configuration API - Write config.json
 app.post('/api/config', async (req, res) => {
   try {
-    const config = req.body;
+    const { config, password, token } = req.body;
     
     // Validate config structure
     if (!config || typeof config !== 'object') {
       return res.status(400).json({ success: false, message: 'Invalid config data' });
     }
 
+    // Verify password or 2FA token
+    const configPassword = process.env.CONFIG_PASSWORD;
+    if (!configPassword) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Configuration password not set. Please set CONFIG_PASSWORD in .env file.' 
+      });
+    }
+
+    let verified = false;
+
+    // Try password first
+    if (password && password === configPassword) {
+      verified = true;
+    } 
+    // If password failed or not provided, try 2FA token
+    else if (token) {
+      try {
+        // Get 2FA secret from config file (login is always handled by Firebase)
+        const config = await readConfig();
+        
+        if (config.twoFactorAuth && config.twoFactorAuth.enabled && config.twoFactorAuth.secret) {
+          const secret = config.twoFactorAuth.secret;
+          verified = speakeasy.totp.verify({
+            secret: secret,
+            encoding: 'base32',
+            token: token,
+            window: 2
+          });
+        }
+      } catch (error: any) {
+        console.error('Error reading config for 2FA verification:', error);
+        // Don't query MySQL - just set verified to false if config read fails
+        verified = false;
+      }
+    }
+
+    if (!verified) {
+      return res.status(401).json({ success: false, message: 'Invalid password or 2FA token' });
+    }
+
     // Ensure directory exists
     const configDir = path.dirname(CONFIG_FILE_PATH);
     await fs.mkdir(configDir, { recursive: true });
 
+    // Don't save administratorEmail to config.json - it comes from .env
+    // Remove it from config before saving
+    const configToSave = { ...config };
+    delete configToSave.administratorEmail;
+
     // Write config file
-    await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(config, null, 2), 'utf-8');
+    await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(configToSave, null, 2), 'utf-8');
     
     res.json({ success: true, message: 'Configuration saved successfully' });
   } catch (error: any) {
@@ -591,6 +764,44 @@ const readConfig = async () => {
     }
 };
 
+// Delete user from Firebase Auth (requires Admin SDK)
+app.delete('/api/users/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'User ID is required' });
+    }
+
+    // Ensure Firebase Admin is initialized
+    await initializeFirebaseAdmin();
+
+    // Check if Firebase Admin is initialized
+    if (!admin.apps.length) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Firebase Admin SDK not initialized. Please configure FIREBASE_SERVICE_ACCOUNT_PATH in .env file with path to your Firebase service account JSON file.' 
+      });
+    }
+
+    try {
+      // Delete user from Firebase Auth
+      await admin.auth().deleteUser(userId);
+      res.status(200).json({ success: true, message: 'User deleted from Firebase Auth' });
+    } catch (error: any) {
+      // If user doesn't exist in Auth, that's okay - they might have been deleted already
+      if (error.code === 'auth/user-not-found') {
+        res.status(200).json({ success: true, message: 'User not found in Firebase Auth (may have been deleted already)' });
+      } else {
+        throw error;
+      }
+    }
+  } catch (error: any) {
+    console.error('Error deleting user from Firebase Auth:', error);
+    res.status(500).json({ success: false, message: error.message || 'Failed to delete user from Firebase Auth' });
+  }
+});
+
 // Helper function to write config
 const writeConfig = async (config: any) => {
     const configDir = path.dirname(CONFIG_FILE_PATH);
@@ -598,16 +809,19 @@ const writeConfig = async (config: any) => {
     await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(config, null, 2), 'utf-8');
 };
 
-// 2FA API - Generate secret and QR code
-app.get('/api/2fa/generate-secret', async (req, res) => {
+// 2FA API - Generate secret and QR code (user-specific)
+app.post('/api/2fa/generate-secret', async (req, res) => {
     try {
-        const config = await readConfig();
-        const userEmail = config.firebaseConfig?.projectId || 'admin@dns.local';
-        
+        const { userId, email } = req.body;
+
+        if (!userId || !email) {
+            return res.status(400).json({ success: false, message: 'UserId and email are required' });
+        }
+
         // Generate secret
         const secret = speakeasy.generateSecret({
-            name: `DNS Manpower Manager (${userEmail})`,
-            issuer: 'DNS Manpower Manager',
+            name: `DNS Manpower (${email})`,
+            issuer: 'DNS Manpower Management',
             length: 32
         });
 
@@ -626,13 +840,13 @@ app.get('/api/2fa/generate-secret', async (req, res) => {
     }
 });
 
-// 2FA API - Verify and Enable 2FA
+// 2FA API - Verify and Enable 2FA (user-specific)
 app.post('/api/2fa/enable', async (req, res) => {
     try {
-        const { secret, token } = req.body;
+        const { userId, secret, token } = req.body;
 
-        if (!secret || !token) {
-            return res.status(400).json({ success: false, message: 'Secret and token are required' });
+        if (!userId || !secret || !token) {
+            return res.status(400).json({ success: false, message: 'UserId, secret, and token are required' });
         }
 
         // Verify the token
@@ -647,14 +861,8 @@ app.post('/api/2fa/enable', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid verification code. Please try again.' });
         }
 
-        // Save 2FA settings to config
-        const config = await readConfig();
-        config.twoFactorAuth = {
-            enabled: true,
-            secret: secret
-        };
-        await writeConfig(config);
-
+        // Note: The frontend will save to Firestore directly
+        // This endpoint just verifies the token is valid
         res.json({ success: true, message: 'Two-factor authentication enabled successfully' });
     } catch (error: any) {
         console.error('Error enabling 2FA:', error);
@@ -662,24 +870,22 @@ app.post('/api/2fa/enable', async (req, res) => {
     }
 });
 
-// 2FA API - Verify TOTP code (for login)
+// 2FA API - Verify TOTP code (user-specific, accepts secret from frontend)
 app.post('/api/2fa/verify', async (req, res) => {
     try {
-        const { token } = req.body;
+        const { userId, token, secret } = req.body;
 
         if (!token) {
             return res.status(400).json({ success: false, message: 'Token is required' });
         }
 
-        const config = await readConfig();
-        
-        if (!config.twoFactorAuth || !config.twoFactorAuth.enabled || !config.twoFactorAuth.secret) {
-            return res.status(400).json({ success: false, message: 'Two-factor authentication is not enabled' });
+        if (!secret) {
+            return res.status(400).json({ success: false, message: 'Secret is required for verification' });
         }
 
         // Verify the token
         const verified = speakeasy.totp.verify({
-            secret: config.twoFactorAuth.secret,
+            secret: secret,
             encoding: 'base32',
             token: token,
             window: 2 // Allow 2 time steps (60 seconds) of tolerance
@@ -696,24 +902,22 @@ app.post('/api/2fa/verify', async (req, res) => {
     }
 });
 
-// 2FA API - Disable 2FA
+// 2FA API - Disable 2FA (user-specific)
 app.post('/api/2fa/disable', async (req, res) => {
     try {
-        const { token } = req.body;
+        const { userId, token, secret } = req.body;
 
         if (!token) {
             return res.status(400).json({ success: false, message: '2FA verification code is required' });
         }
 
-        const config = await readConfig();
-        
-        if (!config.twoFactorAuth || !config.twoFactorAuth.enabled || !config.twoFactorAuth.secret) {
-            return res.status(400).json({ success: false, message: 'Two-factor authentication is not enabled' });
+        if (!secret) {
+            return res.status(400).json({ success: false, message: 'Secret is required for verification' });
         }
 
         // Verify the token before disabling
         const verified = speakeasy.totp.verify({
-            secret: config.twoFactorAuth.secret,
+            secret: secret,
             encoding: 'base32',
             token: token,
             window: 2 // Allow 2 time steps (60 seconds) of tolerance
@@ -723,12 +927,8 @@ app.post('/api/2fa/disable', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid verification code. Please try again.' });
         }
 
-        // Remove 2FA settings only after verification
-        config.twoFactorAuth = {
-            enabled: false
-        };
-        await writeConfig(config);
-
+        // Note: The frontend will update Firestore directly
+        // This endpoint just verifies the token is valid
         res.json({ success: true, message: 'Two-factor authentication disabled successfully' });
     } catch (error: any) {
         console.error('Error disabling 2FA:', error);
@@ -736,15 +936,17 @@ app.post('/api/2fa/disable', async (req, res) => {
     }
 });
 
-// 2FA API - Get 2FA status
+// 2FA API - Get 2FA status (user-specific)
 app.get('/api/2fa/status', async (req, res) => {
     try {
-        const config = await readConfig();
-        const isEnabled = config.twoFactorAuth?.enabled === true;
+        const { userId } = req.query;
         
+        // Note: The frontend will read from Firestore directly
+        // This endpoint is kept for backward compatibility but returns false
+        // The frontend should use Firestore to get the actual status
         res.json({
             success: true,
-            enabled: isEnabled
+            enabled: false // Frontend should check Firestore
         });
     } catch (error: any) {
         console.error('Error getting 2FA status:', error);

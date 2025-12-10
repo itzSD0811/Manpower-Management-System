@@ -6,14 +6,18 @@ import Input from '../components/ui/Input';
 import { Plus, Trash2, DollarSign, FileText, AlertTriangle } from 'lucide-react';
 import db from '../services/db';
 import { PrepaymentEntity, EmployeeEntity, SectionEntity } from '../types';
+import { useAuth } from '../context/AuthContext';
+import { canUserEditPage } from '../services/permissionService';
 
 const Prepayments: React.FC = () => {
+  const { currentUser } = useAuth();
   const [prepayments, setPrepayments] = useState<PrepaymentEntity[]>([]);
   const [employees, setEmployees] = useState<EmployeeEntity[]>([]);
   const [sections, setSections] = useState<SectionEntity[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
   
   // Modal states
   const [activeModal, setActiveModal] = useState<'salary_advance' | 'other' | null>(null);
@@ -43,7 +47,15 @@ const Prepayments: React.FC = () => {
   
   useEffect(() => {
     loadData();
-  }, []);
+    checkPermissions();
+  }, [currentUser]);
+
+  const checkPermissions = async () => {
+    if (currentUser?.uid) {
+      const hasEdit = await canUserEditPage(currentUser.uid, 'prepayments');
+      setCanEdit(hasEdit);
+    }
+  };
   
   const loadData = async () => {
     setIsLoading(true);
@@ -263,12 +275,16 @@ const Prepayments: React.FC = () => {
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage salary advances and other prepayments.</p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={handleOpenSalaryAdvance} icon={<Plus size={16} />}>
-            + Salary Advance
-          </Button>
-          <Button onClick={handleOpenOther} icon={<Plus size={16} />} variant="secondary">
-            + Other
-          </Button>
+          {canEdit && (
+            <>
+              <Button onClick={handleOpenSalaryAdvance} icon={<Plus size={16} />}>
+                + Salary Advance
+              </Button>
+              <Button onClick={handleOpenOther} icon={<Plus size={16} />} variant="secondary">
+                + Other
+              </Button>
+            </>
+          )}
         </div>
       </div>
       
@@ -378,14 +394,16 @@ const Prepayments: React.FC = () => {
                         {prep.reason || '-'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => handleDelete(prep)}
-                          className="bg-red-500 bg-opacity-20 text-red-700 hover:bg-red-600 hover:bg-opacity-30 dark:bg-red-400 dark:bg-opacity-20 dark:text-red-300 dark:hover:bg-red-500 dark:hover:bg-opacity-30"
-                        >
-                          <Trash2 size={16} />
-                        </Button>
+                        {canEdit && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleDelete(prep)}
+                            className="bg-red-500 bg-opacity-20 text-red-700 hover:bg-red-600 hover:bg-opacity-30 dark:bg-red-400 dark:bg-opacity-20 dark:text-red-300 dark:hover:bg-red-500 dark:hover:bg-opacity-30"
+                          >
+                            <Trash2 size={16} />
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   );
