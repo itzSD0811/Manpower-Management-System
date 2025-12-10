@@ -86,7 +86,7 @@ const Sidebar: React.FC = () => {
         )}
         
         {permissions.dashboard && (
-        <NavLink to="/" className={linkClass}>
+        <NavLink to="/dashboard" className={linkClass}>
           <LayoutDashboard size={20} />
           <span className="font-medium">Dashboard</span>
         </NavLink>
