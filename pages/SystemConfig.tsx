@@ -147,20 +147,34 @@ const SystemConfig: React.FC = () => {
 
   // Disable 2FA confirmation modal state
   const [disable2FAModalOpen, setDisable2FAModalOpen] = useState(false);
+  const [disable2FACode, setDisable2FACode] = useState('');
+  const [disable2FAError, setDisable2FAError] = useState('');
 
   // Disable 2FA
   const handleDisable2FA = async () => {
+    if (!disable2FACode || disable2FACode.length !== 6) {
+      setDisable2FAError('Please enter a valid 6-digit code');
+      return;
+    }
+
     setTwoFactorLoading(true);
+    setDisable2FAError('');
     setTwoFactorError('');
     setTwoFactorSuccess('');
+    
     try {
-      await twoFactorService.disable2FA();
+      // First verify the 2FA code
+      await twoFactorService.verify2FA(disable2FACode);
+      
+      // If verification succeeds, disable 2FA
+      await twoFactorService.disable2FA(disable2FACode);
       setTwoFactorEnabled(false);
       setDisable2FAModalOpen(false);
+      setDisable2FACode('');
       setTwoFactorSuccess('Two-factor authentication disabled successfully');
       setTimeout(() => setTwoFactorSuccess(''), 5000);
     } catch (error: any) {
-      setTwoFactorError(error.message || 'Failed to disable 2FA');
+      setDisable2FAError(error.message || 'Failed to disable 2FA. Please check your code.');
     } finally {
       setTwoFactorLoading(false);
     }
@@ -225,9 +239,14 @@ const SystemConfig: React.FC = () => {
 
   const handleLogout = async () => {
     try {
+      console.log("Logout button clicked");
       await logout();
-    } catch (error) {
+      // Force page reload to ensure clean state - redirect to home
+      window.location.href = '/#/';
+    } catch (error: any) {
       console.error("Failed to log out", error);
+      // Even if logout fails, redirect to force clean state
+      window.location.href = '/#/';
     }
   };
 
@@ -841,22 +860,63 @@ service cloud.firestore {
       </Modal>
 
       {/* Disable 2FA Confirmation Modal */}
-      <Modal isOpen={disable2FAModalOpen} onClose={() => setDisable2FAModalOpen(false)} title="Disable Two-Factor Authentication" size="md">
+      <Modal isOpen={disable2FAModalOpen} onClose={() => {
+        setDisable2FAModalOpen(false);
+        setDisable2FACode('');
+        setDisable2FAError('');
+      }} title="Disable Two-Factor Authentication" size="md">
         <div className="space-y-4">
           <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 flex items-start gap-3">
             <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">Security Warning</p>
               <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
-                Are you sure you want to disable two-factor authentication? This will make your account less secure.
+                To disable two-factor authentication, please enter your 2FA code from your authenticator app. This will make your account less secure.
               </p>
             </div>
+          </div>
+
+          {disable2FAError && (
+            <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded relative flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+              <span className="font-medium">{disable2FAError}</span>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Enter 2FA Code <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              value={disable2FACode}
+              onChange={(e) => {
+                const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                setDisable2FACode(value);
+                setDisable2FAError('');
+              }}
+              placeholder="000000"
+              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-dns-red focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-center text-2xl tracking-widest font-mono transition-all duration-200"
+              autoFocus
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
+              Enter the 6-digit code from your authenticator app
+            </p>
           </div>
 
           <div className="flex gap-3 pt-2">
             <Button
               variant="secondary"
-              onClick={() => setDisable2FAModalOpen(false)}
+              onClick={() => {
+                setDisable2FAModalOpen(false);
+                setDisable2FACode('');
+                setDisable2FAError('');
+              }}
               disabled={twoFactorLoading}
               className="flex-1"
             >
@@ -866,7 +926,7 @@ service cloud.firestore {
               variant="danger"
               onClick={handleDisable2FA}
               isLoading={twoFactorLoading}
-              disabled={twoFactorLoading}
+              disabled={twoFactorLoading || disable2FACode.length !== 6}
               icon={<X size={16} />}
               className="flex-1"
             >

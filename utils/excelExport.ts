@@ -1,4 +1,4 @@
-import { EmployeeEntity, SectionEntity, GroupEntity, AttendanceRecordEntity } from '../types';
+import { EmployeeEntity, SectionEntity, GroupEntity, AttendanceRecordEntity, PrepaymentEntity } from '../types';
 import * as ExcelJS from 'exceljs';
 import { formatShortName } from './stringUtils';
 
@@ -98,7 +98,8 @@ export const generatePaymentDetailsExcel = async (
   paymentPeriod: string,
   employees: EmployeeEntity[],
   sections: SectionEntity[],
-  groups: GroupEntity[]
+  groups: GroupEntity[],
+  prepayments?: PrepaymentEntity[]
 ) => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Payment Details');
@@ -179,8 +180,24 @@ export const generatePaymentDetailsExcel = async (
         const epf12 = totalSalary * 0.12;
         const epf8 = totalSalary * 0.08;
         const etf3 = totalSalary * 0.03;
-        const otherDeductions = 0; // Blank for now
-        const salaryAdvance = 0; // Blank for now
+        
+        // Calculate prepayments for this employee and payment period
+        let salaryAdvance = 0;
+        let otherDeductions = 0;
+        
+        if (prepayments) {
+            const employeePrepayments = prepayments.filter(p => 
+                p.employeeId === emp.id && p.month === paymentPeriod
+            );
+            
+            employeePrepayments.forEach(prep => {
+                if (prep.type === 'salary_advance') {
+                    salaryAdvance += prep.amount;
+                } else if (prep.type === 'other') {
+                    otherDeductions += prep.amount;
+                }
+            });
+        }
         
         const netSalary = totalSalary - (epf12 + epf8 + etf3 + otherDeductions + salaryAdvance);
         

@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS prepayments;
 DROP TABLE IF EXISTS employee_attendance_metadata;
 DROP TABLE IF EXISTS attendance_data;
 DROP TABLE IF EXISTS attendance_records;
@@ -72,4 +73,17 @@ CREATE TABLE employee_attendance_metadata (
   FOREIGN KEY (recordId) REFERENCES attendance_records(id) ON DELETE CASCADE,
   FOREIGN KEY (employeeId) REFERENCES employees(id) ON DELETE CASCADE,
   UNIQUE KEY (recordId, employeeId)
+);
+
+CREATE TABLE prepayments (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  type ENUM('salary_advance', 'other') NOT NULL,
+  month VARCHAR(7) NOT NULL,
+  employeeId VARCHAR(36) NOT NULL,
+  amount DECIMAL(10, 2) NOT NULL,
+  reason TEXT,
+  createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (employeeId) REFERENCES employees(id) ON DELETE CASCADE,
+  INDEX idx_month (month),
+  INDEX idx_employee (employeeId)
 );

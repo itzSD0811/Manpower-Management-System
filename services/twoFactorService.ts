@@ -57,12 +57,13 @@ export const verify2FA = async (token: string): Promise<{ success: boolean; mess
   return result;
 };
 
-export const disable2FA = async (): Promise<{ success: boolean; message: string }> => {
+export const disable2FA = async (token: string): Promise<{ success: boolean; message: string }> => {
   const response = await fetch(`${API_URL}/2fa/disable`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
+    body: JSON.stringify({ token }),
   });
   const result = await response.json();
   if (!response.ok) {

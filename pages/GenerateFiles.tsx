@@ -124,8 +124,12 @@ const GenerateFiles: React.FC = () => {
             return;
         }
 
+        // Fetch prepayments for the payment period
+        const allPrepayments = await db.getPrepayments();
+        const periodPrepayments = allPrepayments.filter(p => p.month === paymentPeriod);
+
         // Generate the Excel file
-        await generatePaymentDetailsExcel(attendanceRecord, paymentPeriod, sectionEmployees, sections, groups);
+        await generatePaymentDetailsExcel(attendanceRecord, paymentPeriod, sectionEmployees, sections, groups, periodPrepayments);
 
         setIsPaymentModalOpen(false);
         setSuccessMessage("Payment details Excel file generated successfully!");

@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
-import { getAuth, Auth } from "firebase/auth";
+import { getAuth, Auth, setPersistence, browserSessionPersistence } from "firebase/auth";
 import { getFirestore, Firestore } from "firebase/firestore";
 import { loadConfigSync } from './configService';
 
@@ -22,6 +22,8 @@ export const reinitializeFirebase = async () => {
     try {
       app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
       auth = getAuth(app);
+      // Set persistence to session-only (not local) for security - prevents cross-device login
+      await setPersistence(auth, browserSessionPersistence);
       db = getFirestore(app);
     } catch (error) {
       console.error("Failed to reinitialize Firebase with updated config:", error);
@@ -36,6 +38,11 @@ if (firebaseConfig && firebaseConfig.projectId) {
   try {
     app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
+    // Set persistence to session-only (not local) for security - prevents cross-device login
+    // This ensures sessions only last for the browser session, not across devices
+    setPersistence(auth, browserSessionPersistence).catch((error) => {
+      console.error("Failed to set auth persistence:", error);
+    });
     db = getFirestore(app);
   } catch (error) {
     console.error("Failed to initialize Firebase with provided config:", error);
@@ -45,7 +52,7 @@ if (firebaseConfig && firebaseConfig.projectId) {
     db = null;
   }
 } else {
-    console.warn("Firebase config not found or incomplete. Firebase services will be disabled.");
+  console.warn("Firebase config not found or incomplete. Firebase services will be disabled.");
 }
 
 // Export the potentially null services

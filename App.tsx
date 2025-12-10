@@ -9,6 +9,7 @@ import GroupManagement from './pages/GroupManagement';
 import SystemConfig from './pages/SystemConfig';
 import GenerateFiles from './pages/GenerateFiles';
 import Attendance from './pages/Attendance';
+import Prepayments from './pages/Prepayments';
 import { useAuth } from './context/AuthContext';
 import LoginModal from './components/ui/LoginModal';
 import SetupRequired from './components/ui/SetupRequired';
@@ -57,6 +58,7 @@ const App: React.FC = () => {
           <Route index element={<Dashboard />} />
           <Route path="employees" element={<EmployeeManagement />} />
           <Route path="attendance" element={<Attendance />} />
+          <Route path="prepayments" element={<Prepayments />} />
           <Route path="sections" element={<SectionManagement />} />
           <Route path="groups" element={<GroupManagement />} />
           <Route path="files" element={<GenerateFiles />} />
@@ -67,11 +69,8 @@ const App: React.FC = () => {
     </HashRouter>
   );
 
-  if (dbType === 'mysql') {
-    return <AppRouter />;
-  }
-
-  // dbType is 'firebase'
+  // Firebase is ALWAYS required for authentication, regardless of dbType (MySQL or Firebase)
+  // dbType only affects data storage, not authentication
   if (!isFirebaseConfigured) {
       // Allow access only to settings page to configure firebase
       return (
@@ -84,7 +83,7 @@ const App: React.FC = () => {
       );
   }
 
-  // Firebase is configured, check for user
+  // Firebase is configured, check for user authentication
   // Use site key from config, fallback to environment variable for backward compatibility
   const siteKey = recaptchaSiteKey || import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
   

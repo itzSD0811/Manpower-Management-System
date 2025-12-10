@@ -1,14 +1,34 @@
-import { SectionEntity, GroupEntity, EmployeeEntity, AttendanceRecordEntity, FirebaseConfig, MysqlConfig } from '../types';
+import { SectionEntity, GroupEntity, EmployeeEntity, AttendanceRecordEntity, FirebaseConfig, MysqlConfig, PrepaymentEntity } from '../types';
 
 const API_URL = 'http://localhost:3001/api';
 
 const request = async <T>(url: string, options?: RequestInit): Promise<T> => {
-    const response = await fetch(url, options);
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ message: 'An unknown error occurred' }));
-        throw new Error(error.message);
+    try {
+        const response = await fetch(url, options);
+        if (!response.ok) {
+            let errorMessage = 'An unknown error occurred';
+            try {
+                const error = await response.json();
+                errorMessage = error.message || errorMessage;
+            } catch {
+                errorMessage = `Server responded with status ${response.status}`;
+            }
+            throw new Error(errorMessage);
+        }
+        // Handle responses that might be empty or have different content types
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+            const text = await response.text();
+            if (text && text.trim()) {
+                return JSON.parse(text);
+            }
+        }
+        // For DELETE requests that return 200 OK with no body, return empty object
+        return {} as T;
+    } catch (error: any) {
+        console.error('Request error:', url, error);
+        throw error;
     }
-    return response.json();
 };
 
 export const getSections = (): Promise<SectionEntity[]> => request(`${API_URL}/sections`);
@@ -73,6 +93,20 @@ export const saveAttendanceRecord = (record: AttendanceRecordEntity): Promise<an
 
 export const deleteAttendanceRecord = (id: string): Promise<any> => {
     return request(`${API_URL}/attendance-records/${id}`, { method: 'DELETE' });
+};
+
+export const getPrepayments = (): Promise<PrepaymentEntity[]> => request(`${API_URL}/prepayments`);
+
+export const savePrepayment = (prepayment: PrepaymentEntity): Promise<any> => {
+    return request(`${API_URL}/prepayments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(prepayment),
+    });
+};
+
+export const deletePrepayment = async (id: string): Promise<void> => {
+    await request(`${API_URL}/prepayments/${id}`, { method: 'DELETE' });
 };
 
 export const checkDatabaseConnection = async (config: MysqlConfig): Promise<{ success: boolean, message: string }> => {

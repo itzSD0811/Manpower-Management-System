@@ -1,4 +1,4 @@
-import { SectionEntity, GroupEntity, EmployeeEntity, FirebaseConfig, AttendanceRecordEntity } from '../types';
+import { SectionEntity, GroupEntity, EmployeeEntity, FirebaseConfig, AttendanceRecordEntity, PrepaymentEntity } from '../types';
 import { db, firebaseConfig } from './firebaseConfig';
 import { collection, getDocs, doc, setDoc, deleteDoc, QuerySnapshot, DocumentData, query, where, getDoc } from 'firebase/firestore';
 
@@ -357,4 +357,48 @@ export const deleteAttendanceRecord = async (id: string): Promise<void> => {
 
   }
 
+};
+
+// --- Prepayments ---
+export const getPrepayments = async (): Promise<PrepaymentEntity[]> => {
+  if (db) {
+    try {
+      const snapshot = await timeoutPromise(getDocs(collection(db, 'prepayments')), 10000, "Get Prepayments") as QuerySnapshot<DocumentData>;
+      return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as PrepaymentEntity));
+    } catch (error) {
+      console.error("Firebase read error (Prepayments):", error);
+      return [];
+    }
+  }
+  return [];
+};
+
+export const savePrepayment = async (item: Omit<PrepaymentEntity, 'id'> | PrepaymentEntity): Promise<PrepaymentEntity> => {
+  if (!db) throw new Error("Database not connected");
+
+  const id = getId(item);
+  // Only set createdAt for Firebase (MySQL handles it automatically)
+  const newItem = { ...item, id, createdAt: item.createdAt || new Date().toISOString() } as PrepaymentEntity;
+  
+  try {
+    await timeoutPromise(setDoc(doc(db, 'prepayments', id), newItem), 10000, "Save Prepayment");
+    console.log(`Firebase: Saved Prepayment ${id}`);
+    return newItem;
+  } catch (error) {
+    console.error("Firebase write error (Prepayments):", error);
+    throw error;
+  }
+};
+
+export const deletePrepayment = async (id: string): Promise<void> => {
+  if (!db) throw new Error("Database not connected");
+  if (!id) throw new Error("Invalid ID for deletion");
+  
+  try {
+    await timeoutPromise(deleteDoc(doc(db, 'prepayments', id)), 10000, "Delete Prepayment");
+    console.log(`Firebase: Deleted Prepayment ${id}`);
+  } catch (error) {
+    console.error("Firebase delete error (Prepayments):", error);
+    throw error;
+  }
 };

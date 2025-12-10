@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Users, Layers, Briefcase, LayoutDashboard, Settings, Moon, Sun, FileText, CalendarDays, Github } from 'lucide-react';
+import { Users, Layers, Briefcase, LayoutDashboard, Settings, Moon, Sun, FileText, CalendarDays, Github, DollarSign } from 'lucide-react';
 import { Logo } from './Logo';
 import { useTheme } from '../context/ThemeContext';
 
@@ -38,6 +38,11 @@ const Sidebar: React.FC = () => {
         <NavLink to="/attendance" className={linkClass}>
           <CalendarDays size={20} />
           <span className="font-medium">Attendance</span>
+        </NavLink>
+        
+        <NavLink to="/prepayments" className={linkClass}>
+          <DollarSign size={20} />
+          <span className="font-medium">Prepayments</span>
         </NavLink>
 
         <div className="pt-4 pb-2 px-4 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">

@@ -16,6 +16,7 @@ chatmedia
 # Configuration files (contains sensitive data)
 config.json
 server/config.json
+.gitignore
 .env
 .env.local
 .env.*.local

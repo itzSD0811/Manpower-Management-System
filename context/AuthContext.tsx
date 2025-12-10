@@ -36,14 +36,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const loadConfigData = async () => {
       try {
         const config = await loadConfig();
-        const isFirebase = config.dbType === 'firebase';
-        const firebaseConfigured = !!(isFirebase && config.firebaseConfig && config.firebaseConfig.projectId);
         
+        // dbType only affects data storage, not authentication
         setDbType(config.dbType);
+        
+        // Firebase is ALWAYS required for authentication, regardless of dbType
+        const firebaseConfigured = !!(config.firebaseConfig && config.firebaseConfig.projectId);
         setIsFirebaseConfigured(firebaseConfigured);
 
-        // Reinitialize Firebase if config was loaded from API
-        if (isFirebase && firebaseConfigured) {
+        // Always initialize Firebase for authentication (even if MySQL is selected for data storage)
+        if (firebaseConfigured) {
           const firebaseModule = await import('../services/firebaseConfig');
           await firebaseModule.reinitializeFirebase();
           
@@ -57,16 +59,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           }
         }
         
+        // If Firebase is not configured, user cannot authenticate
         setCurrentUser(null);
         setLoading(false);
       } catch (error) {
         console.error('Failed to load config:', error);
         // Fallback to sync version
         const config = loadConfigSync();
-        const isFirebase = config.dbType === 'firebase';
-        const firebaseConfigured = !!(isFirebase && config.firebaseConfig && config.firebaseConfig.projectId);
         
+        // dbType only affects data storage, not authentication
         setDbType(config.dbType);
+        
+        // Firebase is ALWAYS required for authentication
+        const firebaseConfigured = !!(config.firebaseConfig && config.firebaseConfig.projectId);
         setIsFirebaseConfigured(firebaseConfigured);
         
         if (auth && firebaseConfigured) {
@@ -93,10 +98,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const logout = async () => {
-    if (!auth) {
-      return;
+    try {
+      if (!auth) {
+        console.warn("Auth not available for logout");
+        // Clear local state even if auth is not available
+        setCurrentUser(null);
+        return;
+      }
+      console.log("Logging out...");
+      await signOut(auth);
+      // Ensure user state is cleared
+      setCurrentUser(null);
+      console.log("Logout successful");
+    } catch (error) {
+      console.error("Error during logout:", error);
+      // Clear user state even if signOut fails
+      setCurrentUser(null);
+      throw error;
     }
-    await signOut(auth);
   };
 
   const value = {
