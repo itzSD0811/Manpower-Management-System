@@ -5,7 +5,10 @@ import Button from './Button';
 import { LogIn, Eye, EyeOff, Lock, Mail, AlertCircle, Shield, Key } from 'lucide-react';
 import { Logo } from '../Logo';
 import * as twoFactorService from '../../services/twoFactorService';
+import * as user2FAService from '../../services/user2FAService';
 import * as recaptchaService from '../../services/recaptchaService';
+import { signOut } from 'firebase/auth';
+import { auth } from '../../services/firebaseConfig';
 
 const LoginModal: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -17,6 +20,9 @@ const LoginModal: React.FC = () => {
   const [show2FA, setShow2FA] = useState(false);
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [twoFactorError, setTwoFactorError] = useState('');
+  const [useBackupCode, setUseBackupCode] = useState(false);
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
+  const [skip2FACheck, setSkip2FACheck] = useState(false); // Flag to skip 2FA check after verification
   const { login } = useAuth();
   const { executeRecaptcha } = useGoogleReCaptcha();
 
@@ -30,8 +36,72 @@ const LoginModal: React.FC = () => {
       return;
     }
 
+    // If user is already authenticated, don't proceed
+    // Also check if we're in the middle of a 2FA verification flow
+    if (auth?.currentUser && !show2FA) {
+      setIsLoading(false);
+      return;
+    }
+    
+    // If we're showing 2FA screen, don't allow regular login
+    if (show2FA) {
+      setIsLoading(false);
+      return;
+    }
+
+    // Clear any stale skip flags at the start of a new login attempt
+    // This ensures we always check 2FA for a fresh login
+    if (!show2FA && !skip2FACheck) {
+      sessionStorage.removeItem('skip_2fa_check');
+      setSkip2FACheck(false);
+    }
+
     setIsLoading(true);
     try {
+      // Skip 2FA check if we're already past the 2FA verification step
+      // Check both state and sessionStorage to handle re-renders
+      // MUST check this BEFORE calling login() to prevent loop
+      const shouldSkip2FA = skip2FACheck || sessionStorage.getItem('skip_2fa_check') === 'true';
+      
+      if (shouldSkip2FA) {
+        // This is a post-2FA login, just sign in and return
+        // Verify reCAPTCHA if available
+        if (executeRecaptcha) {
+          try {
+            const recaptchaToken = await executeRecaptcha('login');
+            await recaptchaService.verifyRecaptcha(recaptchaToken);
+          } catch (recaptchaError) {
+            console.warn('reCAPTCHA verification failed:', recaptchaError);
+          }
+        }
+        
+        await login(email, password);
+        
+        // Wait a bit for auth state to update
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Clear checking_2fa flag since we're past 2FA
+        sessionStorage.removeItem('checking_2fa');
+        
+        // Reset the flags
+        setSkip2FACheck(false);
+        sessionStorage.removeItem('skip_2fa_check');
+        
+        // Save email to localStorage if remember me is checked
+        if (rememberMe) {
+          localStorage.setItem('rememberedEmail', email);
+        } else {
+          localStorage.removeItem('rememberedEmail');
+        }
+        
+        // Clear password for security
+        setPassword('');
+        
+        // Login is complete, AuthContext will handle the rest
+        setIsLoading(false);
+        return;
+      }
+
       // Verify reCAPTCHA if available
       if (executeRecaptcha) {
         try {
@@ -45,29 +115,53 @@ const LoginModal: React.FC = () => {
         }
       }
 
-      // Check if 2FA is enabled BEFORE attempting login
+      // First, sign in to get the user ID
+      // Use a flag to track if we're checking 2FA to prevent auth state from showing app
+      sessionStorage.setItem('checking_2fa', 'true');
+      
+      await login(email, password);
+      
+      // Get the user ID from auth IMMEDIATELY after sign in
+      if (!auth || !auth.currentUser) {
+        sessionStorage.removeItem('checking_2fa');
+        throw new Error('Failed to authenticate user');
+      }
+      
+      const userId = auth.currentUser.uid;
+      
+      // Check if this user has 2FA enabled - do this IMMEDIATELY
       let requires2FA = false;
       try {
-        const twoFactorStatus = await twoFactorService.get2FAStatus();
+        console.log('[Login] Checking 2FA status for user:', userId);
+        const twoFactorStatus = await user2FAService.getUser2FAStatus(userId);
+        console.log('[Login] 2FA status result:', twoFactorStatus);
         requires2FA = twoFactorStatus.enabled;
-      } catch (twoFactorError) {
-        // If 2FA check fails, continue with normal login
-        console.warn('Failed to check 2FA status:', twoFactorError);
+        console.log('[Login] 2FA required:', requires2FA);
+      } catch (twoFactorError: any) {
+        // If 2FA check fails, log the error but continue with normal login
+        console.error('[Login] Failed to check 2FA status:', twoFactorError);
+        console.error('[Login] Error details:', twoFactorError.message, twoFactorError.stack);
+        // Don't block login if 2FA check fails - assume 2FA is not enabled
+        requires2FA = false;
       }
 
-      // If 2FA is required, we need to verify it first
+      // If 2FA is required, sign out and show 2FA verification
       if (requires2FA) {
-        // Show 2FA verification step first
-        // Store credentials temporarily for after 2FA verification
+        console.log('[Login] 2FA is required, signing out and showing 2FA screen');
+        // Sign out immediately to prevent session establishment
+        await signOut(auth);
+        // Store user ID and credentials for 2FA verification
+        setPendingUserId(userId);
         setShow2FA(true);
+        sessionStorage.setItem('checking_2fa', 'true'); // Keep flag set during 2FA
         setIsLoading(false);
-        // Don't login yet - wait for 2FA verification
+        // Don't proceed - wait for 2FA verification
         return;
+      } else {
+        console.log('[Login] 2FA is not required, proceeding with normal login');
+        // Clear the checking flag since 2FA is not required
+        sessionStorage.removeItem('checking_2fa');
       }
-
-      // No 2FA required, proceed with normal login
-      // Note: You can send recaptchaToken to your backend for verification
-      await login(email, password);
 
       // Save email to localStorage if remember me is checked
       if (rememberMe) {
@@ -88,7 +182,21 @@ const LoginModal: React.FC = () => {
     e.preventDefault();
     setTwoFactorError('');
     
-    if (!twoFactorCode || twoFactorCode.length !== 6) {
+    if (!pendingUserId) {
+      setTwoFactorError('Session expired. Please try logging in again.');
+      setShow2FA(false);
+      setPendingUserId(null);
+      return;
+    }
+
+    const code = twoFactorCode.trim();
+    
+    if (!code) {
+      setTwoFactorError(useBackupCode ? 'Please enter a backup code' : 'Please enter a valid 6-digit code');
+      return;
+    }
+
+    if (!useBackupCode && code.length !== 6) {
       setTwoFactorError('Please enter a valid 6-digit code');
       return;
     }
@@ -107,22 +215,72 @@ const LoginModal: React.FC = () => {
         }
       }
 
-      // Verify 2FA code first
-      await twoFactorService.verify2FA(twoFactorCode);
-      
-      // 2FA verified successfully, now proceed with login
-      // Note: You can send recaptchaToken to your backend for verification
-      await login(email, password);
-      
-      // Save email to localStorage if remember me is checked
-      if (rememberMe) {
-        localStorage.setItem('rememberedEmail', email);
+      // Verify 2FA code or backup code
+      let verified = false;
+      if (useBackupCode) {
+        const result = await user2FAService.verifyUserBackupCode(pendingUserId, code);
+        verified = result.success;
+        if (!verified) {
+          throw new Error(result.message || 'Invalid backup code');
+        }
       } else {
-        localStorage.removeItem('rememberedEmail');
+        const result = await user2FAService.verifyUser2FA(pendingUserId, code);
+        verified = result.success;
+        if (!verified) {
+          throw new Error(result.message || 'Invalid verification code');
+        }
       }
-      // The AuthContext will detect the logged-in user and hide the login modal
+      
+      // 2FA/Backup code verified successfully, now proceed with login
+      // Clear 2FA state first
+      setShow2FA(false);
+      setTwoFactorCode('');
+      const savedEmail = email;
+      const savedPassword = password;
+      const savedRememberMe = rememberMe;
+      setPendingUserId(null);
+      setUseBackupCode(false);
+      
+      // Now sign in directly - bypass handleLogin to avoid loop
+      try {
+        // Sign in directly using Firebase auth (bypass handleLogin)
+        if (!auth) {
+          throw new Error('Firebase auth is not available');
+        }
+        
+        const { signInWithEmailAndPassword } = await import('firebase/auth');
+        await signInWithEmailAndPassword(auth, savedEmail, savedPassword);
+        
+        console.log('[2FA] User signed in successfully, reloading page...');
+        
+        // Save email to localStorage if remember me is checked
+        if (savedRememberMe) {
+          localStorage.setItem('rememberedEmail', savedEmail);
+        } else {
+          localStorage.removeItem('rememberedEmail');
+        }
+        
+        // Clear all flags before reload
+        sessionStorage.removeItem('checking_2fa');
+        sessionStorage.removeItem('skip_2fa_check');
+        setSkip2FACheck(false);
+        
+        // Clear password for security
+        setPassword('');
+        
+        // Reload the page to ensure auth state is properly initialized
+        // This is the simplest and most reliable way to ensure everything is in sync
+        window.location.reload();
+      } catch (loginError: any) {
+        // If login fails, clear flags and show error
+        sessionStorage.removeItem('checking_2fa');
+        sessionStorage.removeItem('skip_2fa_check');
+        setSkip2FACheck(false);
+        setTwoFactorError(loginError.message || 'Failed to complete login. Please try again.');
+        setIsLoading(false);
+      }
     } catch (err: any) {
-      setTwoFactorError(err.message || 'Invalid verification code. Please try again.');
+      setTwoFactorError(err.message || (useBackupCode ? 'Invalid backup code. Please try again.' : 'Invalid verification code. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -185,7 +343,9 @@ const LoginModal: React.FC = () => {
                   <p className="text-sm font-medium text-blue-800 dark:text-blue-200">Two-Factor Authentication Required</p>
                 </div>
                 <p className="text-sm text-blue-700 dark:text-blue-300">
-                  Please enter the 6-digit code from your Google Authenticator app.
+                  {useBackupCode 
+                    ? 'Enter one of your backup codes to sign in.'
+                    : 'Please enter the 6-digit code from your Google Authenticator app.'}
                 </p>
               </div>
 
@@ -201,7 +361,7 @@ const LoginModal: React.FC = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Verification Code
+                  {useBackupCode ? 'Backup Code' : 'Verification Code'}
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -211,20 +371,48 @@ const LoginModal: React.FC = () => {
                     type="text"
                     value={twoFactorCode}
                     onChange={(e) => {
-                      const value = e.target.value.replace(/\D/g, '').slice(0, 6);
-                      setTwoFactorCode(value);
+                      if (useBackupCode) {
+                        // For backup codes, allow alphanumeric, uppercase, max 8 chars
+                        const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+                        setTwoFactorCode(value);
+                      } else {
+                        // For 2FA codes, only digits, max 6 chars
+                        const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                        setTwoFactorCode(value);
+                      }
                       setTwoFactorError('');
                     }}
-                    className="block w-full pl-10 pr-3 py-3 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-dns-red focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-all duration-200 text-center text-2xl font-mono tracking-widest"
-                    placeholder="000000"
+                    className={`block w-full pl-10 pr-3 py-3 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-dns-red focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-all duration-200 ${
+                      useBackupCode 
+                        ? 'text-center text-lg font-mono tracking-wider' 
+                        : 'text-center text-2xl font-mono tracking-widest'
+                    }`}
+                    placeholder={useBackupCode ? 'ABCD1234' : '000000'}
                     required
-                    maxLength={6}
+                    maxLength={useBackupCode ? 8 : 6}
                     autoFocus
                   />
                 </div>
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 text-center">
-                  Enter the 6-digit code from Google Authenticator
+                  {useBackupCode 
+                    ? 'Enter one of your 8-character backup codes'
+                    : 'Enter the 6-digit code from Google Authenticator'}
                 </p>
+              </div>
+
+              {/* Toggle between 2FA code and backup code */}
+              <div className="flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseBackupCode(!useBackupCode);
+                    setTwoFactorCode('');
+                    setTwoFactorError('');
+                  }}
+                  className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 underline"
+                >
+                  {useBackupCode ? 'Use 2FA code instead' : 'Use backup code instead'}
+                </button>
               </div>
 
               <div className="flex gap-3 pt-2">
@@ -235,6 +423,8 @@ const LoginModal: React.FC = () => {
                     setShow2FA(false);
                     setTwoFactorCode('');
                     setTwoFactorError('');
+                    setUseBackupCode(false);
+                    setPendingUserId(null);
                     setPassword(''); // Clear password for security
                   }}
                   disabled={isLoading}
@@ -245,7 +435,7 @@ const LoginModal: React.FC = () => {
                 <Button
                   type="submit"
                   isLoading={isLoading}
-                  disabled={isLoading || twoFactorCode.length !== 6}
+                  disabled={isLoading || (useBackupCode ? twoFactorCode.length < 8 : twoFactorCode.length !== 6)}
                   icon={<Key size={18} />}
                   className="flex-1"
                 >

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserCircle, Shield, QrCode, Key, X, AlertTriangle, Pencil, LogOut, Save } from 'lucide-react';
+import { UserCircle, Shield, QrCode, Key, X, AlertTriangle, Pencil, LogOut, Save, Download, RefreshCw } from 'lucide-react';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
@@ -8,6 +8,8 @@ import { useAuth } from '../context/AuthContext';
 import { getUserDisplayName, setUserDisplayName, getUserDisplayNameOnly } from '../utils/userUtils';
 import { getUserById, getRoleById } from '../services/userManagementService';
 import { loadConfigSync } from '../services/configService';
+import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
+import { auth } from '../services/firebaseConfig';
 
 const Profile: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -32,6 +34,22 @@ const Profile: React.FC = () => {
   const [disable2FAModalOpen, setDisable2FAModalOpen] = useState(false);
   const [disable2FACode, setDisable2FACode] = useState('');
   const [disable2FAError, setDisable2FAError] = useState('');
+  
+  // Backup Codes State
+  const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
+  const [backupCodesModalOpen, setBackupCodesModalOpen] = useState(false);
+  const [regenerateBackupCodesModalOpen, setRegenerateBackupCodesModalOpen] = useState(false);
+  const [regenerateVerificationCode, setRegenerateVerificationCode] = useState('');
+  const [regenerateError, setRegenerateError] = useState('');
+  const [regenerateLoading, setRegenerateLoading] = useState(false);
+  
+  // Password Verification State for Backup Codes
+  const [passwordVerificationModalOpen, setPasswordVerificationModalOpen] = useState(false);
+  const [backupCodesPassword, setBackupCodesPassword] = useState('');
+  const [backupCodesPasswordError, setBackupCodesPasswordError] = useState('');
+  const [backupCodesPasswordLoading, setBackupCodesPasswordLoading] = useState(false);
+  const [passwordVerified, setPasswordVerified] = useState(false);
+  const [pendingBackupCodesAction, setPendingBackupCodesAction] = useState<'view' | 'download' | null>(null);
 
   // Load display name, role, and 2FA status on mount
   useEffect(() => {
@@ -105,8 +123,128 @@ const Profile: React.FC = () => {
     try {
       const status = await user2FAService.getUser2FAStatus(currentUser.uid);
       setTwoFactorEnabled(status.enabled);
+      
+      // Load backup codes if 2FA is enabled
+      if (status.enabled) {
+        await loadBackupCodes();
+      }
     } catch (error) {
       console.error('Failed to load 2FA status:', error);
+    }
+  };
+
+  const loadBackupCodes = async () => {
+    if (!currentUser?.uid) return;
+    try {
+      const codes = await user2FAService.getUserBackupCodes(currentUser.uid);
+      setBackupCodes(codes);
+    } catch (error) {
+      console.error('Failed to load backup codes:', error);
+    }
+  };
+
+  const downloadBackupCodes = () => {
+    if (!backupCodes || !currentUser?.email) return;
+    
+    const content = `DNS Manpower Management System - 2FA Backup Codes
+
+IMPORTANT: Keep these codes in a safe place. You can use them to access your account if you lose access to your authenticator app.
+
+Email: ${currentUser.email}
+Generated: ${new Date().toLocaleString()}
+
+Backup Codes:
+${backupCodes.map((code, index) => `${index + 1}. ${code}`).join('\n')}
+
+Instructions:
+- Each code can only be used once
+- Use these codes if you lose access to your authenticator app
+- Keep this file secure and do not share it with anyone
+- You can regenerate new codes from your Profile page (requires authenticator verification)
+
+Security Note:
+If you suspect your backup codes have been compromised, regenerate them immediately from your Profile page.`;
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `2fa-backup-codes-${currentUser.email.replace('@', '-at-')}-${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleRegenerateBackupCodes = async () => {
+    if (!currentUser?.uid) return;
+    if (regenerateVerificationCode.length !== 6) {
+      setRegenerateError('Please enter a valid 6-digit code');
+      return;
+    }
+
+    setRegenerateLoading(true);
+    setRegenerateError('');
+
+    try {
+      const newCodes = await user2FAService.regenerateUserBackupCodes(currentUser.uid, regenerateVerificationCode);
+      setBackupCodes(newCodes);
+      setRegenerateBackupCodesModalOpen(false);
+      setRegenerateVerificationCode('');
+      setBackupCodesModalOpen(true);
+      setTwoFactorSuccess('Backup codes regenerated successfully');
+      setTimeout(() => setTwoFactorSuccess(''), 5000);
+    } catch (error: any) {
+      setRegenerateError(error.message || 'Failed to regenerate backup codes. Please check your code.');
+    } finally {
+      setRegenerateLoading(false);
+    }
+  };
+
+  // Verify password for backup codes access
+  const handleVerifyBackupCodesPassword = async () => {
+    if (!currentUser?.email || !auth) {
+      setBackupCodesPasswordError('Unable to verify password. Please try again.');
+      return;
+    }
+
+    if (!backupCodesPassword) {
+      setBackupCodesPasswordError('Please enter your password');
+      return;
+    }
+
+    setBackupCodesPasswordLoading(true);
+    setBackupCodesPasswordError('');
+
+    try {
+      // Reauthenticate user with their password
+      const credential = EmailAuthProvider.credential(currentUser.email, backupCodesPassword);
+      await reauthenticateWithCredential(currentUser, credential);
+      
+      // Password verified successfully
+      setPasswordVerified(true);
+      setPasswordVerificationModalOpen(false);
+      setBackupCodesPassword('');
+      
+      // Perform the pending action
+      if (pendingBackupCodesAction === 'view') {
+        setBackupCodesModalOpen(true);
+      } else if (pendingBackupCodesAction === 'download') {
+        downloadBackupCodes();
+      }
+      
+      setPendingBackupCodesAction(null);
+    } catch (error: any) {
+      console.error('Password verification failed:', error);
+      if (error.code === 'auth/wrong-password') {
+        setBackupCodesPasswordError('Incorrect password. Please try again.');
+      } else if (error.code === 'auth/too-many-requests') {
+        setBackupCodesPasswordError('Too many failed attempts. Please try again later.');
+      } else {
+        setBackupCodesPasswordError(error.message || 'Failed to verify password. Please try again.');
+      }
+    } finally {
+      setBackupCodesPasswordLoading(false);
     }
   };
 
@@ -144,6 +282,13 @@ const Profile: React.FC = () => {
       setTwoFactorEnabled(true);
       setQrCodeModalOpen(false);
       setVerificationCode('');
+      
+      // Load backup codes after enabling
+      await loadBackupCodes();
+      
+      // Show backup codes modal
+      setBackupCodesModalOpen(true);
+      
       setTwoFactorSuccess('Two-factor authentication enabled successfully');
       setTimeout(() => setTwoFactorSuccess(''), 5000);
     } catch (error: any) {
@@ -382,6 +527,54 @@ const Profile: React.FC = () => {
               </p>
             </div>
           </div>
+
+          {/* Backup Codes Section */}
+          {twoFactorEnabled && (
+            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">Backup Codes</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Use these codes if you lose access to your authenticator app
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-3">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setPendingBackupCodesAction('view');
+                    setPasswordVerificationModalOpen(true);
+                  }}
+                  icon={<Key size={14} />}
+                >
+                  View Codes
+                </Button>
+                {backupCodes && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setPendingBackupCodesAction('download');
+                      setPasswordVerificationModalOpen(true);
+                    }}
+                    icon={<Download size={14} />}
+                  >
+                    Download
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setRegenerateBackupCodesModalOpen(true)}
+                  icon={<RefreshCw size={14} />}
+                >
+                  Regenerate
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -552,6 +745,195 @@ const Profile: React.FC = () => {
               className="flex-1"
             >
               Disable 2FA
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Backup Codes Modal */}
+      <Modal isOpen={backupCodesModalOpen} onClose={() => setBackupCodesModalOpen(false)} title="2FA Backup Codes" size="md">
+        <div className="space-y-4">
+          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200 mb-1">Important Security Information</p>
+                <p className="text-xs text-yellow-700 dark:text-yellow-300">
+                  Save these backup codes in a safe place. Each code can only be used once. 
+                  If you lose access to your authenticator app, you can use these codes to access your account.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {backupCodes && backupCodes.length > 0 ? (
+            <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+              <div className="grid grid-cols-2 gap-2 font-mono text-sm">
+                {backupCodes.map((code, index) => (
+                  <div key={index} className="p-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 text-center">
+                    {code}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-4 text-gray-500 dark:text-gray-400">
+              No backup codes available. Please regenerate them.
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <Button
+              variant="secondary"
+              onClick={() => setBackupCodesModalOpen(false)}
+              className="flex-1"
+            >
+              Close
+            </Button>
+            {backupCodes && backupCodes.length > 0 && (
+              <Button
+                onClick={() => {
+                  setPendingBackupCodesAction('download');
+                  setPasswordVerificationModalOpen(true);
+                }}
+                icon={<Download size={16} />}
+                className="flex-1"
+              >
+                Download as TXT
+              </Button>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      {/* Password Verification Modal for Backup Codes */}
+      <Modal isOpen={passwordVerificationModalOpen} onClose={() => {
+        setPasswordVerificationModalOpen(false);
+        setBackupCodesPassword('');
+        setBackupCodesPasswordError('');
+        setPendingBackupCodesAction(null);
+      }} title="Verify Password" size="md">
+        <div className="space-y-4">
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+            <p className="text-sm text-blue-800 dark:text-blue-200">
+              <strong>Security Verification Required:</strong> Enter your account password to {pendingBackupCodesAction === 'view' ? 'view' : 'download'} backup codes.
+            </p>
+          </div>
+
+          {backupCodesPasswordError && (
+            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
+              {backupCodesPasswordError}
+            </div>
+          )}
+
+          <div>
+            <Input
+              label="Password"
+              type="password"
+              placeholder="Enter your password"
+              value={backupCodesPassword}
+              onChange={(e) => {
+                setBackupCodesPassword(e.target.value);
+                setBackupCodesPasswordError('');
+              }}
+              required
+              autoFocus
+              onKeyPress={(e) => {
+                if (e.key === 'Enter' && backupCodesPassword && !backupCodesPasswordLoading) {
+                  handleVerifyBackupCodesPassword();
+                }
+              }}
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Enter your account password to access backup codes
+            </p>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setPasswordVerificationModalOpen(false);
+                setBackupCodesPassword('');
+                setBackupCodesPasswordError('');
+                setPendingBackupCodesAction(null);
+              }}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleVerifyBackupCodesPassword}
+              isLoading={backupCodesPasswordLoading}
+              disabled={!backupCodesPassword}
+              className="flex-1"
+            >
+              Verify
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Regenerate Backup Codes Modal */}
+      <Modal isOpen={regenerateBackupCodesModalOpen} onClose={() => {
+        setRegenerateBackupCodesModalOpen(false);
+        setRegenerateVerificationCode('');
+        setRegenerateError('');
+      }} title="Regenerate Backup Codes" size="md">
+        <div className="space-y-4">
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+            <p className="text-sm text-blue-800 dark:text-blue-200">
+              <strong>Security Verification Required:</strong> Enter your 6-digit authenticator code to regenerate backup codes. 
+              Your old backup codes will be invalidated.
+            </p>
+          </div>
+
+          {regenerateError && (
+            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
+              {regenerateError}
+            </div>
+          )}
+
+          <div>
+            <Input
+              label="Authenticator Code"
+              type="text"
+              inputMode="numeric"
+              placeholder="000000"
+              value={regenerateVerificationCode}
+              onChange={(e) => {
+                const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                setRegenerateVerificationCode(value);
+                setRegenerateError('');
+              }}
+              maxLength={6}
+              required
+              autoFocus
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Enter the 6-digit code from your authenticator app
+            </p>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setRegenerateBackupCodesModalOpen(false);
+                setRegenerateVerificationCode('');
+                setRegenerateError('');
+              }}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRegenerateBackupCodes}
+              isLoading={regenerateLoading}
+              disabled={regenerateVerificationCode.length !== 6}
+              className="flex-1"
+            >
+              Regenerate Codes
             </Button>
           </div>
         </div>

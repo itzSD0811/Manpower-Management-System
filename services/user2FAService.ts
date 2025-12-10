@@ -1,5 +1,21 @@
 const API_URL = 'http://localhost:3001/api';
 
+// Generate backup codes for a user (8 codes, each 8 characters)
+const generateBackupCodes = (): string[] => {
+  const codes: string[] = [];
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Exclude confusing characters like 0, O, I, 1
+  
+  for (let i = 0; i < 8; i++) {
+    let code = '';
+    for (let j = 0; j < 8; j++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    codes.push(code);
+  }
+  
+  return codes;
+};
+
 // Generate 2FA secret for a user (via backend, then save to Firestore)
 export const generateUser2FASecret = async (userId: string, email: string): Promise<{ secret: string; qrCode: string; manualEntryKey: string }> => {
   const response = await fetch(`${API_URL}/2fa/generate-secret`, {
@@ -38,21 +54,30 @@ export const getUser2FAStatus = async (userId: string): Promise<{ enabled: boole
   const { db } = await import('./firebaseConfig');
   const { doc, getDoc } = await import('firebase/firestore');
   
-  if (!db) throw new Error("Firebase Firestore is not configured");
+  if (!db) {
+    console.error("Firebase Firestore is not configured");
+    throw new Error("Firebase Firestore is not configured");
+  }
 
   try {
+    console.log('Getting 2FA status from Firestore for user:', userId);
     const docRef = doc(db, 'user2fa', userId);
     const docSnap = await getDoc(docRef);
     
     if (!docSnap.exists()) {
+      console.log('2FA document does not exist for user:', userId);
       return { enabled: false };
     }
 
     const data = docSnap.data();
-    return { enabled: data.enabled === true };
+    console.log('2FA document data:', data);
+    const enabled = data.enabled === true;
+    console.log('2FA enabled status:', enabled);
+    return { enabled };
   } catch (error: any) {
     console.error("Error getting 2FA status:", error);
-    return { enabled: false };
+    // Re-throw the error so the caller can handle it
+    throw error;
   }
 };
 
@@ -78,12 +103,17 @@ export const enableUser2FA = async (userId: string, secret: string, token: strin
   
   if (!db) throw new Error("Firebase Firestore is not configured");
 
+  // Generate backup codes when enabling 2FA
+  const backupCodes = generateBackupCodes();
+
   await setDoc(doc(db, 'user2fa', userId), {
     userId,
     secret,
     enabled: true,
     createdAt: Timestamp.fromDate(new Date()),
     enabledAt: Timestamp.fromDate(new Date()),
+    backupCodes: backupCodes,
+    backupCodesGeneratedAt: Timestamp.fromDate(new Date()),
   }, { merge: true });
 
   return verifyResult;
@@ -173,5 +203,101 @@ export const disableUser2FA = async (userId: string, token: string): Promise<{ s
   });
   
   return result;
+};
+
+// Get backup codes for a user (from Firestore)
+export const getUserBackupCodes = async (userId: string): Promise<string[] | null> => {
+  const { db } = await import('./firebaseConfig');
+  const { doc, getDoc } = await import('firebase/firestore');
+  
+  if (!db) throw new Error("Firebase Firestore is not configured");
+
+  try {
+    const docRef = doc(db, 'user2fa', userId);
+    const docSnap = await getDoc(docRef);
+    
+    if (!docSnap.exists()) {
+      return null;
+    }
+
+    const data = docSnap.data();
+    return data.backupCodes || null;
+  } catch (error: any) {
+    console.error("Error getting backup codes:", error);
+    return null;
+  }
+};
+
+// Generate and save new backup codes for a user (requires 2FA verification)
+export const regenerateUserBackupCodes = async (userId: string, verificationToken: string): Promise<string[]> => {
+  // First verify the token
+  const verifyResult = await verifyUser2FA(userId, verificationToken);
+  if (!verifyResult.success) {
+    throw new Error(verifyResult.message || 'Invalid verification code');
+  }
+
+  // Generate new backup codes
+  const newBackupCodes = generateBackupCodes();
+
+  // Save to Firestore
+  const { db } = await import('./firebaseConfig');
+  const { doc, setDoc, Timestamp, getDoc } = await import('firebase/firestore');
+  
+  if (!db) throw new Error("Firebase Firestore is not configured");
+
+  // Get existing data first
+  const docRef = doc(db, 'user2fa', userId);
+  const docSnap = await getDoc(docRef);
+  const existingData = docSnap.exists() ? docSnap.data() : {};
+
+  await setDoc(doc(db, 'user2fa', userId), {
+    ...existingData,
+    backupCodes: newBackupCodes,
+    backupCodesGeneratedAt: Timestamp.fromDate(new Date()),
+  }, { merge: true });
+
+  return newBackupCodes;
+};
+
+// Verify backup code for a user (removes the code after successful verification)
+export const verifyUserBackupCode = async (userId: string, backupCode: string): Promise<{ success: boolean; message: string }> => {
+  const { db } = await import('./firebaseConfig');
+  const { doc, getDoc, updateDoc } = await import('firebase/firestore');
+  
+  if (!db) throw new Error("Firebase Firestore is not configured");
+
+  const docRef = doc(db, 'user2fa', userId);
+  const docSnap = await getDoc(docRef);
+  
+  if (!docSnap.exists()) {
+    return { success: false, message: '2FA is not enabled for this user' };
+  }
+
+  const data = docSnap.data();
+  const enabled = data.enabled === true;
+  const backupCodes: string[] = data.backupCodes || [];
+
+  if (!enabled) {
+    return { success: false, message: '2FA is not enabled for this user' };
+  }
+
+  // Normalize backup code (uppercase, remove spaces)
+  const normalizedCode = backupCode.trim().toUpperCase();
+
+  // Check if backup code exists
+  const codeIndex = backupCodes.findIndex(code => code.toUpperCase() === normalizedCode);
+  
+  if (codeIndex === -1) {
+    return { success: false, message: 'Invalid backup code' };
+  }
+
+  // Remove the used backup code
+  const updatedBackupCodes = backupCodes.filter((_, index) => index !== codeIndex);
+  
+  await updateDoc(docRef, {
+    backupCodes: updatedBackupCodes,
+  });
+
+  return { success: true, message: 'Backup code verified successfully' };
 };
 

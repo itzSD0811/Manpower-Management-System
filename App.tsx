@@ -131,7 +131,15 @@ const App: React.FC = () => {
         nonce: undefined
       }}
     >
-      {!currentUser ? <LoginModal /> : <AppRouter />}
+      {(() => {
+        const checking2FA = sessionStorage.getItem('checking_2fa') === 'true';
+        // Show LoginModal if no user OR if we're checking 2FA
+        // But if user exists and we're not checking 2FA, show the app
+        if (!currentUser || checking2FA) {
+          return <LoginModal />;
+        }
+        return <AppRouter />;
+      })()}
     </GoogleReCaptchaProvider>
   );
 };
