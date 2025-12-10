@@ -10,6 +10,11 @@ export interface SalaryRecord {
   amount: number;
 }
 
+export interface OTPaymentRecord {
+  month: string; // YYYY-MM
+  amount: number;
+}
+
 export interface GroupEntity {
   id: string; // UUID
   name: string;
@@ -22,6 +27,7 @@ export interface GroupEntity {
 
   // New Structure
   salaryHistory: SalaryRecord[];
+  otPaymentHistory: OTPaymentRecord[];
 }
 
 export interface EmployeeEntity {

@@ -155,16 +155,22 @@ export const getGroups = async (): Promise<GroupEntity[]> => {
 
   // Data Migration Helper: Convert old format to new format in memory
   return groupsData.map(g => {
+    const updated: any = { ...g };
+    
     if (!g.salaryHistory || g.salaryHistory.length === 0) {
         if (g.basicSalary && g.salaryDate) {
-            return { 
-                ...g, 
-                salaryHistory: [{ month: g.salaryDate, amount: Number(g.basicSalary) }] 
-            };
+            updated.salaryHistory = [{ month: g.salaryDate, amount: Number(g.basicSalary) }];
+        } else {
+            updated.salaryHistory = []; // Ensure salaryHistory is always an array
         }
-        return { ...g, salaryHistory: [] }; // Ensure salaryHistory is always an array
     }
-    return g;
+    
+    // Ensure otPaymentHistory is always an array
+    if (!g.otPaymentHistory) {
+        updated.otPaymentHistory = [];
+    }
+    
+    return updated;
   });
 };
 

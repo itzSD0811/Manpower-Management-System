@@ -30,6 +30,15 @@ CREATE TABLE group_salaries (
   UNIQUE KEY (groupId, month)
 );
 
+CREATE TABLE group_ot_payments (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  groupId VARCHAR(36) NOT NULL,
+  month VARCHAR(7) NOT NULL,
+  amount DECIMAL(10, 2) NOT NULL,
+  FOREIGN KEY (groupId) REFERENCES `groups`(id) ON DELETE CASCADE,
+  UNIQUE KEY (groupId, month)
+);
+
 CREATE TABLE employees (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   fullName VARCHAR(255) NOT NULL,

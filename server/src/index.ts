@@ -319,8 +319,10 @@ app.get('/api/groups', async (req, res) => {
     for (const group of groups as any[]) {
         const [salaries] = await pool.query('SELECT month, amount FROM group_salaries WHERE groupId = ?', [group.id]);
         group.salaryHistory = salaries;
+        const [otPayments] = await pool.query('SELECT month, amount FROM group_ot_payments WHERE groupId = ?', [group.id]);
+        group.otPaymentHistory = otPayments;
     }
-    console.log('Groups data with salaries:', groups);
+    console.log('Groups data with salaries and OT payments:', groups);
     res.json(groups);
   } catch (error: any) {
     console.error('Error fetching groups:', error);
@@ -329,7 +331,7 @@ app.get('/api/groups', async (req, res) => {
 });
 
 app.post('/api/groups', async (req, res) => {
-    const { id, name, codeId, sectionId, salaryHistory } = req.body;
+    const { id, name, codeId, sectionId, salaryHistory, otPaymentHistory } = req.body;
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
@@ -345,6 +347,16 @@ app.post('/api/groups', async (req, res) => {
                 await connection.execute('INSERT INTO group_salaries (groupId, month, amount) VALUES (?, ?, ?)', [id, record.month, record.amount]);
             }
         }
+        
+        // Handle OT payment history
+        // Always delete existing records first, then insert new ones (even if empty array)
+        await connection.execute('DELETE FROM group_ot_payments WHERE groupId = ?', [id]);
+        if (otPaymentHistory && otPaymentHistory.length > 0) {
+            for (const record of otPaymentHistory) {
+                await connection.execute('INSERT INTO group_ot_payments (groupId, month, amount) VALUES (?, ?, ?)', [id, record.month, record.amount]);
+            }
+        }
+        
         await connection.commit();
         res.status(201).json({ success: true });
     } catch (error: any) {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, CheckCircle, AlertTriangle, XCircle, Banknote, Calendar } from 'lucide-react';
-import { GroupEntity, SectionEntity, SalaryRecord } from '../types';
+import { Plus, Edit, Trash2, CheckCircle, AlertTriangle, XCircle, Banknote, Calendar, Clock } from 'lucide-react';
+import { GroupEntity, SectionEntity, SalaryRecord, OTPaymentRecord } from '../types';
 import db from '../services/db';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -21,6 +21,7 @@ const GroupManagement: React.FC = () => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [formData, setFormData] = useState<Partial<GroupEntity>>({});
   const [initialSalary, setInitialSalary] = useState<{amount: string, month: string}>({ amount: '', month: '' });
+  const [initialOTPayment, setInitialOTPayment] = useState<{amount: string, month: string}>({ amount: '', month: '' });
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   
@@ -28,6 +29,10 @@ const GroupManagement: React.FC = () => {
   const [salaryModalOpen, setSalaryModalOpen] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<GroupEntity | null>(null);
   const [newSalaryRecord, setNewSalaryRecord] = useState<{amount: string, month: string}>({ amount: '', month: '' });
+  
+  // OT Payment Management Modal States
+  const [otPaymentModalOpen, setOtPaymentModalOpen] = useState(false);
+  const [newOTPaymentRecord, setNewOTPaymentRecord] = useState<{amount: string, month: string}>({ amount: '', month: '' });
 
   // Notification States
   const [successMessage, setSuccessMessage] = useState('');
@@ -77,12 +82,27 @@ const GroupManagement: React.FC = () => {
     const pastRec = sorted.find(r => r.month <= currentMonth);
     return pastRec ? pastRec.amount : null;
   };
+  
+  const getCurrentMonthOTPayment = (group: GroupEntity): number | null => {
+    if (!group.otPaymentHistory || group.otPaymentHistory.length === 0) return null;
+    
+    const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+    const record = group.otPaymentHistory.find(r => r.month === currentMonth);
+    
+    if (record) return record.amount;
+    
+    // Fallback: Find most recent past OT payment
+    const sorted = [...group.otPaymentHistory].sort((a, b) => b.month.localeCompare(a.month));
+    const pastRec = sorted.find(r => r.month <= currentMonth);
+    return pastRec ? pastRec.amount : null;
+  };
 
   // --- Handlers: Create/Edit Group Basic Info ---
 
   const handleOpenCreate = () => {
     setFormData({});
     setInitialSalary({ amount: '', month: new Date().toISOString().slice(0, 7) }); // Default to current month
+    setInitialOTPayment({ amount: '', month: new Date().toISOString().slice(0, 7) }); // Default to current month
     setIsEditMode(false);
     setFormError('');
     setIsModalOpen(true);
@@ -126,6 +146,7 @@ const GroupManagement: React.FC = () => {
     
     // Construct the object
     const history = finalGroup.salaryHistory || [];
+    const otHistory = finalGroup.otPaymentHistory || [];
     
     // If creating new, add the initial salary input to history
     if (!isEditMode && initialSalary.amount && initialSalary.month) {
@@ -138,7 +159,21 @@ const GroupManagement: React.FC = () => {
             history.push(newRecord);
         }
     }
+    
+    // If creating new, add the initial OT payment input to history
+    if (!isEditMode && initialOTPayment.amount && initialOTPayment.month) {
+        const newOTRecord = { 
+            month: initialOTPayment.month, 
+            amount: Number(initialOTPayment.amount) 
+        };
+        // Avoid duplicates on re-submit
+        if (!otHistory.some(h => h.month === newOTRecord.month)) {
+            otHistory.push(newOTRecord);
+        }
+    }
+    
     finalGroup.salaryHistory = history;
+    finalGroup.otPaymentHistory = otHistory;
 
 
     try {
@@ -162,6 +197,12 @@ const GroupManagement: React.FC = () => {
       setSelectedGroup(group);
       setNewSalaryRecord({ amount: '', month: new Date().toISOString().slice(0, 7) });
       setSalaryModalOpen(true);
+  };
+  
+  const handleOpenOTPaymentManager = (group: GroupEntity) => {
+      setSelectedGroup(group);
+      setNewOTPaymentRecord({ amount: '', month: new Date().toISOString().slice(0, 7) });
+      setOtPaymentModalOpen(true);
   };
 
   const handleAddSalary = async () => {
@@ -213,6 +254,60 @@ const GroupManagement: React.FC = () => {
     } catch (e) {
         console.error(e);
         alert("Failed to delete salary record.");
+    } finally {
+        setIsSaving(false);
+    }
+  };
+  
+  const handleAddOTPayment = async () => {
+      if (!selectedGroup || !newOTPaymentRecord.amount || !newOTPaymentRecord.month) return;
+      
+      const newHistory = [...(selectedGroup.otPaymentHistory || [])];
+      
+      // Remove existing record for same month if exists (overwrite)
+      const existingIdx = newHistory.findIndex(r => r.month === newOTPaymentRecord.month);
+      if (existingIdx >= 0) {
+          newHistory.splice(existingIdx, 1);
+      }
+      
+      newHistory.push({
+          month: newOTPaymentRecord.month,
+          amount: Number(newOTPaymentRecord.amount)
+      });
+      
+      // Sort descending
+      newHistory.sort((a, b) => b.month.localeCompare(a.month));
+
+      const updatedGroup = { ...selectedGroup, otPaymentHistory: newHistory };
+      
+      try {
+          setIsSaving(true);
+          await db.saveGroup(updatedGroup);
+          setSelectedGroup(updatedGroup); // Update local modal state
+          // Update main list
+          setGroups(prev => prev.map(g => g.id === updatedGroup.id ? updatedGroup : g));
+          setNewOTPaymentRecord({ ...newOTPaymentRecord, amount: '' }); // Clear amount, keep month
+      } catch (e) {
+          console.error(e);
+          alert("Failed to save OT payment.");
+      } finally {
+          setIsSaving(false);
+      }
+  };
+
+  const handleDeleteOTPayment = async (monthToDelete: string) => {
+      if (!selectedGroup) return;
+      const newHistory = (selectedGroup.otPaymentHistory || []).filter(r => r.month !== monthToDelete);
+      const updatedGroup = { ...selectedGroup, otPaymentHistory: newHistory };
+
+      try {
+        setIsSaving(true);
+        await db.saveGroup(updatedGroup);
+        setSelectedGroup(updatedGroup);
+        setGroups(prev => prev.map(g => g.id === updatedGroup.id ? updatedGroup : g));
+    } catch (e) {
+        console.error(e);
+        alert("Failed to delete OT payment record.");
     } finally {
         setIsSaving(false);
     }
@@ -302,17 +397,19 @@ const GroupManagement: React.FC = () => {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Group ID</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Parent Section</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Current Month Salary</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Current Month OT Payment</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
           <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
             {groups.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">No groups defined yet.</td>
+                <td colSpan={6} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">No groups defined yet.</td>
               </tr>
             ) : (
               groups.map((grp) => {
                 const currentSalary = getCurrentMonthSalary(grp);
+                const currentOTPayment = getCurrentMonthOTPayment(grp);
                 return (
                   <tr key={grp.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{grp.name}</td>
@@ -329,6 +426,13 @@ const GroupManagement: React.FC = () => {
                           <span className="text-gray-400 italic">Not set for {new Date().toLocaleDateString('default', { month: 'short' })}</span>
                       )}
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white font-medium">
+                      {currentOTPayment ? (
+                          <span className="text-blue-600 dark:text-blue-400">{currentOTPayment.toLocaleString()} LKR</span>
+                      ) : (
+                          <span className="text-gray-400 italic">Not set for {new Date().toLocaleDateString('default', { month: 'short' })}</span>
+                      )}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       {canEdit && (
                         <div className="flex justify-end gap-2">
@@ -338,6 +442,13 @@ const GroupManagement: React.FC = () => {
                                 title="Manage Salaries"
                             >
                                 <Banknote size={16} />
+                            </button>
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); handleOpenOTPaymentManager(grp); }}
+                                className="text-blue-600 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/30 p-2 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900/50"
+                                title="Manage OT Payments"
+                            >
+                                <Clock size={16} />
                             </button>
                             <button 
                                 onClick={(e) => { e.stopPropagation(); handleOpenEdit(grp); }}
@@ -401,6 +512,7 @@ const GroupManagement: React.FC = () => {
           
           {/* Only show initial salary inputs on creation to keep edit simple */}
           {!isEditMode && (
+              <>
               <div className="bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg border border-gray-200 dark:border-gray-600 mt-4">
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
                       <Banknote size={16} /> Initial Salary Setup
@@ -423,6 +535,29 @@ const GroupManagement: React.FC = () => {
                     />
                 </div>
             </div>
+            <div className="bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg border border-gray-200 dark:border-gray-600 mt-4">
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                      <Clock size={16} /> Initial OT Payment Setup
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Input
+                    label="Starting OT Payment"
+                    type="number"
+                    placeholder="0.00"
+                    value={initialOTPayment.amount}
+                    onChange={(e) => setInitialOTPayment({ ...initialOTPayment, amount: e.target.value })}
+                    required
+                    />
+                    <Input
+                    label="Start Month"
+                    type="month"
+                    value={initialOTPayment.month}
+                    onChange={(e) => setInitialOTPayment({ ...initialOTPayment, month: e.target.value })}
+                    required
+                    />
+                </div>
+            </div>
+            </>
           )}
 
           <div className="mt-5 flex justify-end gap-3">
@@ -493,6 +628,83 @@ const GroupManagement: React.FC = () => {
                                         <td className="px-4 py-2 text-right">
                                             <button 
                                                 onClick={() => handleDeleteSalary(rec.month)}
+                                                className="text-red-500 hover:text-red-700 p-1"
+                                                disabled={isSaving}
+                                            >
+                                                <XCircle size={16} />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+      </Modal>
+
+      {/* OT Payment Management Modal */}
+      <Modal
+        isOpen={otPaymentModalOpen}
+        onClose={() => setOtPaymentModalOpen(false)}
+        title={`Manage OT Payments: ${selectedGroup?.name}`}
+      >
+        <div className="space-y-6">
+            {/* Add New Record Section */}
+            <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg border border-gray-200 dark:border-gray-600">
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Add / Update Monthly OT Payment</h4>
+                <div className="flex gap-3 items-end">
+                    <div className="flex-1">
+                        <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Month</label>
+                        <input 
+                            type="month" 
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            value={newOTPaymentRecord.month}
+                            onChange={(e) => setNewOTPaymentRecord({ ...newOTPaymentRecord, month: e.target.value })}
+                        />
+                    </div>
+                    <div className="flex-1">
+                         <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Amount (LKR)</label>
+                        <input 
+                            type="number" 
+                            placeholder="50000"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            value={newOTPaymentRecord.amount}
+                            onChange={(e) => setNewOTPaymentRecord({ ...newOTPaymentRecord, amount: e.target.value })}
+                        />
+                    </div>
+                    <Button onClick={handleAddOTPayment} isLoading={isSaving} icon={<Plus size={16} />}>
+                        Save
+                    </Button>
+                </div>
+            </div>
+
+            {/* History List */}
+            <div>
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                    <Calendar size={16} /> OT Payment History
+                </h4>
+                <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
+                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0">
+                            <tr>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">Month</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">Amount</th>
+                                <th className="px-4 py-2 text-right"></th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                            {selectedGroup?.otPaymentHistory?.length === 0 ? (
+                                <tr><td colSpan={3} className="px-4 py-8 text-center text-sm text-gray-500">No OT payment records found.</td></tr>
+                            ) : (
+                                selectedGroup?.otPaymentHistory?.map((rec) => (
+                                    <tr key={rec.month}>
+                                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-white font-medium">{rec.month}</td>
+                                        <td className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300">{rec.amount.toLocaleString()}</td>
+                                        <td className="px-4 py-2 text-right">
+                                            <button 
+                                                onClick={() => handleDeleteOTPayment(rec.month)}
                                                 className="text-red-500 hover:text-red-700 p-1"
                                                 disabled={isSaving}
                                             >
