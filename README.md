@@ -35,64 +35,69 @@ Both scripts handle everything automatically including dependency installation, 
 
 **Installation Steps:**
 
-1. **Download the installation package:**
-   - Download `Manpower ERP-installation.zip` from the [Releases](https://github.com/itzSD0811/Manpower-Management-System/releases) page
+1. **Download and extract the installation package:**
+   - Download `Manpower ERP-installation.zip` from the [Latest Release](https://github.com/itzSD0811/Manpower-Management-System/releases) page
    - Extract the zip file to your desired location
 
-2. **Choose your installation script:**
+2. **Install system dependencies:**
+   ```bash
+   cd installation-methods
+   chmod +x deps.sh
+   ./deps.sh
+   ```
+   This will install all required system dependencies (Node.js, npm, MySQL, Nginx, Certbot, etc.)
+
+3. **Run the installation script:**
    
    **Option A: Standard Installation (Recommended for normal servers)**
    ```bash
-   cd Manpower-Management-System
-   sudo python3 installation-methods/install.py
+   sudo python3 install.py
    ```
    
    **Option B: Optimized Installation (For low-end machines)**
    ```bash
-   cd Manpower-Management-System
-   sudo python3 installation-methods/install_for_lowend.py
+   sudo python3 install_for_lowend.py
    ```
 
-3. **Follow the interactive prompts:**
-   - The script will check and install missing dependencies (Node.js, npm, MySQL, Nginx, Certbot, etc.)
+4. **Follow the interactive prompts:**
+   - The script will automatically clone the repository from GitHub
    - Configure MySQL database credentials (creates database and user automatically)
    - Set up master password and administrator email
    - Configure domain name and SSL certificate (Let's Encrypt)
-   - Create systemd services for automatic startup
+   - Build the application and create systemd services for automatic startup
 
 **How the Installation Scripts Work:**
 
 The installation scripts automate the entire setup process:
 
-1. **Dependency Management**: Automatically checks for and installs required system packages (Node.js, npm, MySQL, Nginx, Certbot, Python packages)
+1. **Repository Setup**: Automatically clones the repository from GitHub to your specified installation directory
 
-2. **Repository Setup**: Clones the repository from GitHub or uses the extracted files
-
-3. **Application Building**: 
+2. **Application Building**: 
    - Installs frontend and backend npm dependencies
    - Builds the production-ready frontend
+
+3. **Environment Setup**:
+   - Creates `.env` file from `.env.example`
+   - Configures all required environment variables
+   - Sets up master password and administrator email
 
 4. **Database Configuration**:
    - Prompts for MySQL username, password, and database name
    - Creates the MySQL database and user with full privileges
    - Automatically finds and configures `MYSQLDUMP_PATH`
-   - Runs database schema migration
+   - Runs database schema migration (`npm run migrate`)
 
-5. **Environment Setup**:
-   - Creates `.env` file from `.env.example`
-   - Configures all required environment variables
-   - Sets up master password and administrator email
-
-6. **SSL Certificate**: 
+5. **SSL Certificate**: 
    - Configures Let's Encrypt SSL certificate for your domain
    - Sets up automatic renewal
 
-7. **Web Server Configuration**:
+6. **Web Server Configuration**:
    - Configures Nginx as reverse proxy
    - Sets up HTTPS redirect
    - Configures API proxying to backend server
+   - Disables default Nginx site
 
-8. **Service Management**:
+7. **Service Management**:
    - Creates systemd service for backend
    - Enables automatic start on boot
    - Restarts services to load all configurations
