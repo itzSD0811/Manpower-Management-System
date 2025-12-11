@@ -162,7 +162,7 @@ export const getGroups = async (): Promise<GroupEntity[]> => {
             updated.salaryHistory = [{ month: g.salaryDate, amount: Number(g.basicSalary) }];
         } else {
             updated.salaryHistory = []; // Ensure salaryHistory is always an array
-        }
+    }
     }
     
     // Ensure otPaymentHistory is always an array

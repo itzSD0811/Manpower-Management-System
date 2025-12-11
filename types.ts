@@ -10,11 +10,6 @@ export interface SalaryRecord {
   amount: number;
 }
 
-export interface OTPaymentRecord {
-  month: string; // YYYY-MM
-  amount: number;
-}
-
 export interface GroupEntity {
   id: string; // UUID
   name: string;
@@ -27,7 +22,6 @@ export interface GroupEntity {
 
   // New Structure
   salaryHistory: SalaryRecord[];
-  otPaymentHistory: OTPaymentRecord[];
 }
 
 export interface EmployeeEntity {
@@ -92,49 +86,4 @@ export interface RecaptchaConfig {
   enabled?: boolean;
 }
 
-export interface AppConfig {
-  dbType: 'firebase' | 'mysql';
-  mysqlConfig?: MysqlConfig;
-  firebaseConfig?: FirebaseConfig;
-  recaptchaConfig?: RecaptchaConfig;
-  administratorEmail?: string; // Email that gets full access regardless of roles
-}
-
 export type ModalMode = 'create' | 'edit' | 'view';
-
-// User Management Types
-export interface AppUser {
-  id: string; // Firebase UID
-  email: string;
-  displayName?: string;
-  roleId?: string; // Reference to RoleEntity (optional - user may not have a role)
-  createdAt: string; // ISO date string
-  updatedAt?: string; // ISO date string
-  isActive: boolean;
-}
-
-// Role and Permission Types
-export type PermissionLevel = 'none' | 'view' | 'edit';
-
-export interface PagePermission {
-  pageId: string; // e.g., 'dashboard', 'employees', 'attendance', etc.
-  permission: PermissionLevel;
-}
-
-export interface RoleEntity {
-  id: string; // UUID
-  name: string;
-  description?: string;
-  permissions: PagePermission[];
-  hasMasterPermissions?: boolean; // If true, users with this role can manage all users, roles, and system configurations
-  createdAt: string; // ISO date string
-  updatedAt?: string; // ISO date string
-}
-
-// 2FA Types (user-specific)
-export interface User2FA {
-  userId: string; // Firebase UID
-  secret: string; // 2FA secret
-  enabled: boolean;
-  createdAt: string; // ISO date string
-}

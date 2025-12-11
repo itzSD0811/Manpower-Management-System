@@ -16,63 +16,131 @@ The interface is clean, modern, and works great in both light and dark modes. Ev
 
 ## Quick Start
 
-### Automated Installation (Recommended - Linux Only)
+### Automated Installation (Linux Only)
 
-The easiest way to get started on Linux is using our automated installation script. It handles everything automatically including dependency installation, database setup, SSL certificate configuration, and systemd service creation.
+> **Note:** Automated installation scripts are only supported on Linux systems (Ubuntu/Debian recommended). For Windows or custom setups, see the [Manual Installation](#manual-installation) section below.
+
+The easiest way to get started on Linux is using our automated installation scripts. We provide two options:
+
+1. **Standard Installation** - `install.py` - For normal servers with adequate resources
+2. **Optimized Installation** - `install_for_lowend.py` - For low-end machines with limited RAM/CPU
+
+Both scripts handle everything automatically including dependency installation, database setup, SSL certificate configuration, and systemd service creation.
 
 **Prerequisites:**
 - Linux system (Ubuntu/Debian recommended)
 - Root/sudo access
 - Internet connection
+- Python 3 installed
 
 **Installation Steps:**
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/itzSD0811/Manpower-Management-System.git
-   cd Manpower-Management-System
-   ```
+1. **Download the installation package:**
+   - Download `Manpower ERP-installation.zip` from the [Releases](https://github.com/itzSD0811/Manpower-Management-System/releases) page
+   - Extract the zip file to your desired location
 
-2. **Run the installation script:**
+2. **Choose your installation script:**
+   
+   **Option A: Standard Installation (Recommended for normal servers)**
    ```bash
+   cd Manpower-Management-System
    sudo python3 installation-methods/install.py
+   ```
+   
+   **Option B: Optimized Installation (For low-end machines)**
+   ```bash
+   cd Manpower-Management-System
+   sudo python3 installation-methods/install_for_lowend.py
    ```
 
 3. **Follow the interactive prompts:**
    - The script will check and install missing dependencies (Node.js, npm, MySQL, Nginx, Certbot, etc.)
-   - Configure MySQL database credentials
+   - Configure MySQL database credentials (creates database and user automatically)
    - Set up master password and administrator email
    - Configure domain name and SSL certificate (Let's Encrypt)
    - Create systemd services for automatic startup
 
+**How the Installation Scripts Work:**
+
+The installation scripts automate the entire setup process:
+
+1. **Dependency Management**: Automatically checks for and installs required system packages (Node.js, npm, MySQL, Nginx, Certbot, Python packages)
+
+2. **Repository Setup**: Clones the repository from GitHub or uses the extracted files
+
+3. **Application Building**: 
+   - Installs frontend and backend npm dependencies
+   - Builds the production-ready frontend
+
+4. **Database Configuration**:
+   - Prompts for MySQL username, password, and database name
+   - Creates the MySQL database and user with full privileges
+   - Automatically finds and configures `MYSQLDUMP_PATH`
+   - Runs database schema migration
+
+5. **Environment Setup**:
+   - Creates `.env` file from `.env.example`
+   - Configures all required environment variables
+   - Sets up master password and administrator email
+
+6. **SSL Certificate**: 
+   - Configures Let's Encrypt SSL certificate for your domain
+   - Sets up automatic renewal
+
+7. **Web Server Configuration**:
+   - Configures Nginx as reverse proxy
+   - Sets up HTTPS redirect
+   - Configures API proxying to backend server
+
+8. **Service Management**:
+   - Creates systemd service for backend
+   - Enables automatic start on boot
+   - Restarts services to load all configurations
+
 **Installation Script Features:**
 - ✅ Automatic dependency checking and installation
-- ✅ MySQL database setup and schema migration
+- ✅ MySQL database and user creation with privileges
 - ✅ Let's Encrypt SSL certificate configuration
 - ✅ Nginx reverse proxy setup with HTTPS
 - ✅ Systemd service creation for auto-start on boot
 - ✅ Interactive configuration wizard
+- ✅ Resume functionality (can resume interrupted installations)
 - ✅ Uninstall, restart, stop, and start options
-- ✅ Configuration change utilities
+- ✅ Configuration change utilities (domain, passwords, MySQL credentials, etc.)
+
+**Differences Between Scripts:**
+
+| Feature | `install.py` | `install_for_lowend.py` |
+|---------|-------------|------------------------|
+| Target System | Normal servers | Low-end machines |
+| Memory Usage | Standard | Optimized (reduced RAM usage) |
+| Installation Speed | Faster | Slower (pauses between operations) |
+| Resource Limits | Standard | Limited (1GB RAM, 50% CPU) |
+| Swap File | Not created | Auto-created if needed |
 
 **Post-Installation:**
 After installation, your application will be:
 - Running on HTTPS with your configured domain
 - Automatically starting on system boot
 - Accessible via the domain you configured
+- Backend service restarted and ready
 
 **Management Options:**
 The installation script provides a menu for managing your installation:
 - **Install** - Full installation process
-- **Uninstall** - Complete removal
-- **Restart** - Restart services
-- **Stop** - Stop services and disable boot
-- **Start Again** - Start services and enable boot
-- **Change Config** - Modify configuration (domain, passwords, MySQL credentials, etc.)
+- **Uninstall** - Complete removal (removes services, configs, and optionally the installation directory)
+- **Restart** - Restart backend services
+- **Stop** - Stop services and disable auto-start on boot
+- **Start Again** - Start services and enable auto-start on boot
+- **Change Config** - Modify configuration:
+  - Change Domain (updates Nginx and SSL)
+  - Change Master Password
+  - Change MySQL Credentials
+  - Migrate MySQL from Schema
 
-### Manual Installation
+### Manual Installation (Linux, Windows, macOS)
 
-If you prefer to set things up manually or are using a non-Linux system:
+If you prefer to set things up manually, are using a non-Linux system, or need a custom configuration:
 
 1. **Clone the repository:**
    ```bash
