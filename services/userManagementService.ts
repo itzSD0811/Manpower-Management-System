@@ -2,6 +2,7 @@ import { createUserWithEmailAndPassword, User, updateProfile, signOut, deleteUse
 import { auth, db } from './firebaseConfig';
 import { collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, Timestamp } from 'firebase/firestore';
 import { AppUser, RoleEntity } from '../types';
+import { API_URL } from '../utils/apiConfig';
 
 const generateId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -148,7 +149,7 @@ export const deleteUserAccount = async (userId: string): Promise<void> => {
   try {
     // Delete from Firebase Auth via backend API (requires Admin SDK)
     try {
-      const response = await fetch(`http://localhost:3001/api/users/${userId}`, {
+      const response = await fetch(`${API_URL}/users/${userId}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',

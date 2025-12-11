@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:3001/api';
+import { API_URL } from '../utils/apiConfig';
 
 // Generate backup codes for a user (8 codes, each 8 characters)
 const generateBackupCodes = (): string[] => {

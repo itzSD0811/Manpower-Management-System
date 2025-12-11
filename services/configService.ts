@@ -1,4 +1,5 @@
 import { MysqlConfig, FirebaseConfig, RecaptchaConfig } from '../types';
+import { API_URL } from '../utils/apiConfig';
 
 export type DbType = 'firebase' | 'mysql';
 
@@ -8,8 +9,6 @@ export interface AppConfig {
   firebaseConfig?: FirebaseConfig;
   recaptchaConfig?: RecaptchaConfig;
 }
-
-const API_URL = 'http://localhost:3001/api';
 
 // Fallback to localStorage for backward compatibility and when server is not available
 const DB_SELECTION_KEY = 'dbSelection';

@@ -1,6 +1,5 @@
 import { SectionEntity, GroupEntity, EmployeeEntity, AttendanceRecordEntity, FirebaseConfig, MysqlConfig, PrepaymentEntity } from '../types';
-
-const API_URL = 'http://localhost:3001/api';
+import { API_URL } from '../utils/apiConfig';
 
 const request = async <T>(url: string, options?: RequestInit): Promise<T> => {
     try {

@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:3001/api';
+import { API_URL } from '../utils/apiConfig';
 
 export interface RecaptchaVerifyResponse {
   success: boolean;
