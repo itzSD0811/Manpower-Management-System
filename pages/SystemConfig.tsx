@@ -12,6 +12,8 @@ import FirebaseSetupGuide from '../components/ui/FirebaseSetupGuide';
 import RecaptchaSetupGuide from '../components/ui/RecaptchaSetupGuide';
 import * as twoFactorService from '../services/twoFactorService';
 import Modal from '../components/ui/Modal';
+import { getUsers, getRoles } from '../services/userManagementService';
+import { API_URL } from '../utils/apiConfig';
 
 const SystemConfig: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -55,6 +57,11 @@ const SystemConfig: React.FC = () => {
   // Restore State
   const [restoreStatus, setRestoreStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
   const [restoreMessage, setRestoreMessage] = useState('');
+  
+  // Backup State
+  const [backupStatus, setBackupStatus] = useState<'idle' | 'generating' | 'ready' | 'error'>('idle');
+  const [backupData, setBackupData] = useState<{ filename: string; content: string } | null>(null);
+  const [backupError, setBackupError] = useState('');
 
   // 2FA State (only for config password verification)
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
@@ -451,8 +458,97 @@ const SystemConfig: React.FC = () => {
   };
 
 
-  const handleBackup = () => {
-    window.location.href = 'http://localhost:3001/api/mysql-backup';
+  const handleBackup = async (e?: React.MouseEvent) => {
+    // Prevent any default behavior that might cause navigation
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    setBackupStatus('generating');
+    setBackupError('');
+    setBackupData(null);
+    
+    try {
+      // Ensure we're using the correct API URL
+      const apiEndpoint = `${API_URL}/mysql-backup`;
+      console.log('Fetching backup from:', apiEndpoint);
+      
+      const response = await fetch(apiEndpoint, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        },
+        credentials: 'same-origin' // Ensure cookies/auth are sent
+      });
+      
+      console.log('Response status:', response.status);
+      console.log('Response headers:', response.headers.get('content-type'));
+      
+      if (!response.ok) {
+        // Check if response is JSON or HTML
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to create backup');
+        } else {
+          // HTML error response (like 404 or 500 error page)
+          const text = await response.text();
+          console.error('Non-JSON error response:', text.substring(0, 200));
+          throw new Error(`Server error: ${response.status} ${response.statusText}`);
+        }
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        // If response is not JSON, read as text to see what we got
+        const text = await response.text();
+        console.error('Non-JSON response:', text.substring(0, 200));
+        throw new Error('Invalid response format from server');
+      }
+      
+      const data = await response.json();
+      console.log('Backup data received:', { success: data.success, filename: data.filename, contentLength: data.content?.length });
+      
+      if (data.success && data.filename && data.content) {
+        setBackupData({
+          filename: data.filename,
+          content: data.content
+        });
+        setBackupStatus('ready');
+      } else {
+        throw new Error(data.message || 'Backup failed - invalid response');
+      }
+    } catch (err: any) {
+      console.error('Backup error:', err);
+      setBackupError(err.message || 'Failed to create backup. Please try again.');
+      setBackupStatus('error');
+    }
+  };
+
+  const handleDownloadBackup = (e?: React.MouseEvent) => {
+    // Prevent any default behavior
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    if (!backupData) return;
+    
+    // Create a blob from the SQL content
+    const blob = new Blob([backupData.content], { type: 'application/sql' });
+    const url = URL.createObjectURL(blob);
+    
+    // Create a temporary anchor element and trigger download
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = backupData.filename;
+    document.body.appendChild(link);
+    link.click();
+    
+    // Cleanup
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const triggerImport = () => {
@@ -693,10 +789,45 @@ const SystemConfig: React.FC = () => {
                                 Create a full backup of the MySQL database or restore it from a previously created `.sql` file.
                             </p>
                             <div className="flex gap-4">
-                                <Button type="button" variant="secondary" onClick={handleBackup} icon={<Download size={16}/>}>Make SQL Backup</Button>
+                                {backupStatus === 'ready' ? (
+                                    <Button 
+                                        type="button" 
+                                        variant="primary" 
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          handleDownloadBackup(e);
+                                        }}
+                                        icon={<Download size={16}/>}
+                                        className="bg-green-600 hover:bg-green-700 text-white"
+                                    >
+                                        Download SQL Backup
+                                    </Button>
+                                ) : (
+                                    <Button 
+                                        type="button" 
+                                        variant="secondary" 
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          handleBackup(e);
+                                        }}
+                                        icon={<Download size={16}/>}
+                                        disabled={backupStatus === 'generating'}
+                                        isLoading={backupStatus === 'generating'}
+                                    >
+                                        {backupStatus === 'generating' ? 'Generating Backup...' : 'Make SQL Backup'}
+                                    </Button>
+                                )}
                                 <Button type="button" variant="secondary" onClick={triggerImport} icon={<Upload size={16}/>}>Import Backup</Button>
                                 <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".sql" className="hidden" />
                             </div>
+                            {backupError && (
+                                <div className="mt-4 p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-200">
+                                    <p>{backupError}</p>
+                                    <Button size="sm" variant="ghost" onClick={() => { setBackupError(''); setBackupStatus('idle'); }} className="mt-2">Dismiss</Button>
+                                </div>
+                            )}
                             {restoreStatus !== 'idle' && (
                                 <div className="mt-4 p-3 rounded-lg text-sm
                                     {restoreStatus === 'running' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200' : ''}

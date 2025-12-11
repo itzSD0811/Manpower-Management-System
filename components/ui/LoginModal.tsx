@@ -159,17 +159,28 @@ const LoginModal: React.FC = () => {
         return;
       } else {
         console.log('[Login] 2FA is not required, proceeding with normal login');
-        // Clear the checking flag since 2FA is not required
+        
+        // Save email to localStorage if remember me is checked
+        if (rememberMe) {
+          localStorage.setItem('rememberedEmail', email);
+        } else {
+          localStorage.removeItem('rememberedEmail');
+        }
+        
+        // Clear the checking flag and reload page to ensure auth state is properly initialized
         sessionStorage.removeItem('checking_2fa');
-      }
-
-      // Save email to localStorage if remember me is checked
-      if (rememberMe) {
-        localStorage.setItem('rememberedEmail', email);
-      } else {
-        localStorage.removeItem('rememberedEmail');
+        
+        // Clear password for security
+        setPassword('');
+        
+        // Reload the page to ensure auth state is properly synchronized
+        // This is the simplest and most reliable way to ensure everything is in sync
+        window.location.reload();
+        return; // Return early since we're reloading
       }
     } catch (err: any) {
+      // Clear checking flag on error
+      sessionStorage.removeItem('checking_2fa');
       const errorMessage = err?.message || 'Failed to log in. Please check your credentials.';
       setError(errorMessage);
       console.error(err);

@@ -701,7 +701,7 @@ app.get('/api/mysql-backup', (req, res) => {
     }
 
     if (!dbName || !user || !password || !host || !port) {
-        return res.status(500).send('Database environment variables are not fully configured.');
+        return res.status(500).json({ success: false, message: 'Database environment variables are not fully configured.' });
     }
     
     const mysqldump = spawn(finalDumpPath, [
@@ -712,17 +712,11 @@ app.get('/api/mysql-backup', (req, res) => {
         dbName,
     ]);
 
-    let headersSent = false;
+    let sqlContent = '';
     let errorOutput = '';
 
     mysqldump.stdout.on('data', (data) => {
-        if (!headersSent) {
-            const date = new Date().toISOString().slice(0, 10);
-            res.setHeader('Content-Disposition', `attachment; filename="dns_manpower_backup_${date}.sql"`);
-            res.setHeader('Content-Type', 'application/sql');
-            headersSent = true;
-        }
-        res.write(data);
+        sqlContent += data.toString();
     });
 
     mysqldump.stderr.on('data', (data) => {
@@ -733,18 +727,30 @@ app.get('/api/mysql-backup', (req, res) => {
     
     mysqldump.on('error', (error) => {
         console.error(`mysqldump process error: ${error.message}`);
-        if (!headersSent) {
-             res.status(500).send(`Backup process error: ${error.message}. Is mysqldump installed and in your system's PATH?`);
-             headersSent = true;
-        }
+        res.status(500).json({ 
+            success: false, 
+            message: `Backup process error: ${error.message}. Is mysqldump installed and in your system's PATH?` 
+        });
     });
 
     mysqldump.on('close', (code) => {
         console.log(`mysqldump process exited with code ${code}`);
-        if (code !== 0 && !headersSent) {
-             res.status(500).send(`Backup failed with exit code ${code}. Error: ${errorOutput}`);
+        if (code !== 0) {
+            return res.status(500).json({ 
+                success: false, 
+                message: `Backup failed with exit code ${code}. Error: ${errorOutput}` 
+            });
         }
-        res.end();
+        
+        const date = new Date().toISOString().slice(0, 10);
+        const filename = `dns_manpower_backup_${date}.sql`;
+        
+        // Return JSON with SQL content and filename
+        res.json({
+            success: true,
+            filename: filename,
+            content: sqlContent
+        });
     });
 });
 
