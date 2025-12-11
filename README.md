@@ -41,7 +41,6 @@ Both scripts handle everything automatically including dependency installation, 
 
 2. **Install system dependencies:**
    ```bash
-   cd installation-methods
    chmod +x deps.sh
    ./deps.sh
    ```
