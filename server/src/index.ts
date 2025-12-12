@@ -835,7 +835,7 @@ app.post('/api/2fa/generate-secret', async (req, res) => {
         if (!userId || !email) {
             return res.status(400).json({ success: false, message: 'UserId and email are required' });
         }
-
+        
         // Generate secret
         const secret = speakeasy.generateSecret({
             name: `DNS Manpower (${email})`,
@@ -924,7 +924,7 @@ app.post('/api/2fa/verify', async (req, res) => {
 app.post('/api/2fa/disable', async (req, res) => {
     try {
         const { userId, token, secret } = req.body;
-
+        
         if (!token) {
             return res.status(400).json({ success: false, message: '2FA verification code is required' });
         }

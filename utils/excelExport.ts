@@ -127,13 +127,13 @@ export const generatePaymentDetailsExcel = async (
     // --- HEADING ---
     const titleCell = worksheet.getCell('A1');
     titleCell.value = 'DNS MANPOWER SUPPLIERS';
-    worksheet.mergeCells('A1:O1'); // Changed from N to O
+    worksheet.mergeCells('A1:N1');
     titleCell.font = { name: 'Calibri', size: 18, bold: true };
     titleCell.alignment = { horizontal: 'center' };
 
     const subtitleCell = worksheet.getCell('A2');
     subtitleCell.value = `PAYMENT DETAILS FOR EMPLOYEES (${monthName.toUpperCase()}) (${sectionName})`;
-    worksheet.mergeCells('A2:O2'); // Changed from N to O
+    worksheet.mergeCells('A2:N2');
     subtitleCell.font = { name: 'Calibri', size: 14, bold: true };
     subtitleCell.alignment = { horizontal: 'center' };
 
@@ -235,7 +235,7 @@ export const generatePaymentDetailsExcel = async (
     
     footerNotes.forEach(note => {
         const row = worksheet.getRow(currentRow++);
-        worksheet.mergeCells(`A${row.number}:O${row.number}`); // Changed from N to O
+        worksheet.mergeCells(`A${row.number}:N${row.number}`);
         row.getCell('A').value = note;
         row.getCell('A').font = { name: 'Calibri', size: 10 };
     });
@@ -243,18 +243,18 @@ export const generatePaymentDetailsExcel = async (
     currentRow++; // Add a blank line
 
     const signatureRow = worksheet.getRow(currentRow);
-    worksheet.mergeCells(`A${currentRow}:H${currentRow}`); // Changed from G to H
+    worksheet.mergeCells(`A${currentRow}:G${currentRow}`);
     signatureRow.getCell('A').value = "Contractor Representative: ........................";
-    worksheet.mergeCells(`I${currentRow}:O${currentRow}`); // Changed from H to I and N to O
-    signatureRow.getCell('I').value = "CEB Representative: ........................";
+    worksheet.mergeCells(`H${currentRow}:N${currentRow}`);
+    signatureRow.getCell('H').value = "CEB Representative: ........................";
     signatureRow.font = { name: 'Calibri', size: 10 };
 
 
     // --- COLUMN WIDTHS ---
     worksheet.columns = [
-        { width: 10 }, { width: 25 }, { width: 10 }, { width: 10 }, { width: 12 }, // Added one more for additional shifts
+        { width: 10 }, { width: 25 }, { width: 10 }, { width: 10 }, { width: 12 },
         { width: 12 }, { width: 12 }, { width: 10 }, { width: 10 }, { width: 10 },
-        { width: 10 }, { width: 12 }, { width: 18 }, { width: 18 }, { width: 18 } // Added one more for the new total
+        { width: 10 }, { width: 12 }, { width: 18 }, { width: 18 }
     ];
 
     // --- FILE GENERATION ---

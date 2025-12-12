@@ -57,7 +57,7 @@ const SystemConfig: React.FC = () => {
   // Restore State
   const [restoreStatus, setRestoreStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
   const [restoreMessage, setRestoreMessage] = useState('');
-  
+
   // Backup State
   const [backupStatus, setBackupStatus] = useState<'idle' | 'generating' | 'ready' | 'error'>('idle');
   const [backupData, setBackupData] = useState<{ filename: string; content: string } | null>(null);
@@ -496,7 +496,7 @@ const SystemConfig: React.FC = () => {
           const text = await response.text();
           console.error('Non-JSON error response:', text.substring(0, 200));
           throw new Error(`Server error: ${response.status} ${response.statusText}`);
-        }
+    }
       }
       
       const contentType = response.headers.get('content-type');
