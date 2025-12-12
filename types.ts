@@ -86,4 +86,17 @@ export interface RecaptchaConfig {
   enabled?: boolean;
 }
 
+export interface CompanyInfo {
+  id: string; // Always 'company_info' (single document)
+  companyName: string;
+  ownerName: string;
+  address: string;
+  emailAddress: string;
+  telephoneNumbers: string[]; // Array of telephone numbers
+  businessRegistrationNumber?: string;
+  vatRegistrationNumber?: string;
+  ssclRegistrationNumber?: string;
+  updatedAt?: string;
+}
+
 export type ModalMode = 'create' | 'edit' | 'view';

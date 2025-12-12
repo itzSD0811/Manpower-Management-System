@@ -1,6 +1,7 @@
 import { EmployeeEntity, SectionEntity, GroupEntity, AttendanceRecordEntity, PrepaymentEntity } from '../types';
 import * as ExcelJS from 'exceljs';
 import { formatShortName } from './stringUtils';
+import { getCompanyName } from '../services/companyInfoService';
 
 export const generateEmployeeListExcel = async (
   employees: EmployeeEntity[],
@@ -17,8 +18,9 @@ export const generateEmployeeListExcel = async (
     // --- HEADING ---
 
     // Row 1: Main Title
+    const companyName = await getCompanyName();
     const titleCell = worksheet.getCell('A1');
-    titleCell.value = 'DNS List of Employees';
+    titleCell.value = `${companyName} List of Employees`;
     worksheet.mergeCells('A1:H1');
     titleCell.font = { name: 'Calibri', size: 16, bold: true };
     titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -125,8 +127,9 @@ export const generatePaymentDetailsExcel = async (
     }
 
     // --- HEADING ---
+    const companyName = await getCompanyName();
     const titleCell = worksheet.getCell('A1');
-    titleCell.value = 'DNS MANPOWER SUPPLIERS';
+    titleCell.value = companyName;
     worksheet.mergeCells('A1:N1');
     titleCell.font = { name: 'Calibri', size: 18, bold: true };
     titleCell.alignment = { horizontal: 'center' };

@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Flame, CheckCircle, Server, Activity, AlertTriangle, ShieldAlert, Database, HelpCircle, Download, Upload, X, Pencil, Lock, Save, Shield, Users } from 'lucide-react';
+import { Flame, CheckCircle, Server, Activity, AlertTriangle, ShieldAlert, Database, HelpCircle, Download, Upload, X, Pencil, Lock, Save, Shield, Users, Building2, Plus, Trash2 } from 'lucide-react';
 import * as firebase from '../services/firebaseDataService';
 import * as mysql from '../services/mysqlDataService';
 import { saveConfig, loadConfig, loadConfigSync, AppConfig, verifyConfigPassword } from '../services/configService';
-import { MysqlConfig, FirebaseConfig, RecaptchaConfig } from '../types';
+import { MysqlConfig, FirebaseConfig, RecaptchaConfig, CompanyInfo } from '../types';
+import { getCompanyInfo, saveCompanyInfo } from '../services/companyInfoService';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import { useAuth } from '../context/AuthContext';
@@ -72,6 +73,21 @@ const SystemConfig: React.FC = () => {
   const [isEditingMysql, setIsEditingMysql] = useState(false);
   const [firebaseConfigBackup, setFirebaseConfigBackup] = useState<FirebaseConfig | null>(null);
   const [mysqlConfigBackup, setMysqlConfigBackup] = useState<MysqlConfig | null>(null);
+  
+  // Company Info States
+  const [companyInfo, setCompanyInfo] = useState<CompanyInfo>({
+    id: 'company_info',
+    companyName: '',
+    ownerName: '',
+    address: '',
+    emailAddress: '',
+    telephoneNumbers: [''],
+    businessRegistrationNumber: '',
+    vatRegistrationNumber: '',
+    ssclRegistrationNumber: '',
+  });
+  const [isEditingCompanyInfo, setIsEditingCompanyInfo] = useState(false);
+  const [companyInfoBackup, setCompanyInfoBackup] = useState<CompanyInfo | null>(null);
 
   // Password Protection States
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
@@ -105,7 +121,7 @@ const SystemConfig: React.FC = () => {
     return null;
   });
   const [remainingTime, setRemainingTime] = useState<number>(0);
-  const [pendingConfigAction, setPendingConfigAction] = useState<'edit-firebase' | 'edit-mysql' | 'save-config' | null>(null);
+  const [pendingConfigAction, setPendingConfigAction] = useState<'edit-firebase' | 'edit-mysql' | 'edit-company-info' | 'save-config' | null>(null);
 
   // Helper to update failed attempts and persist to sessionStorage
   const updateFailedAttempts = (attempts: number) => {
@@ -199,7 +215,20 @@ const SystemConfig: React.FC = () => {
     loadConfigData();
     load2FAStatus();
     loadSystemStats();
+    loadCompanyInfo();
   }, []);
+
+  // Load company info from Firebase
+  const loadCompanyInfo = async () => {
+    try {
+      const info = await getCompanyInfo();
+      if (info) {
+        setCompanyInfo(info);
+      }
+    } catch (error) {
+      console.error('Failed to load company info:', error);
+    }
+  };
 
   // Load system statistics
   const loadSystemStats = async () => {
@@ -282,6 +311,72 @@ const SystemConfig: React.FC = () => {
     setMysqlConfigBackup(null);
   };
 
+  // Handle Edit Company Info
+  const handleEditCompanyInfo = () => {
+    setPendingConfigAction('edit-company-info');
+    setPasswordModalOpen(true);
+  };
+
+  // Handle Save Company Info
+  const handleSaveCompanyInfo = async () => {
+    try {
+      await saveCompanyInfo({
+        companyName: companyInfo.companyName,
+        ownerName: companyInfo.ownerName,
+        address: companyInfo.address,
+        emailAddress: companyInfo.emailAddress,
+        telephoneNumbers: companyInfo.telephoneNumbers.filter(tel => tel.trim() !== ''),
+        businessRegistrationNumber: companyInfo.businessRegistrationNumber || '',
+        vatRegistrationNumber: companyInfo.vatRegistrationNumber || '',
+        ssclRegistrationNumber: companyInfo.ssclRegistrationNumber || '',
+      });
+      setIsEditingCompanyInfo(false);
+      setCompanyInfoBackup(null);
+      // Reload to get updated timestamp
+      await loadCompanyInfo();
+    } catch (error: any) {
+      console.error('Failed to save company info:', error);
+      alert('Failed to save company information: ' + (error.message || 'Unknown error'));
+    }
+  };
+
+  // Handle Cancel Company Info Edit
+  const handleCancelCompanyInfo = () => {
+    if (companyInfoBackup) {
+      setCompanyInfo(companyInfoBackup);
+    }
+    setIsEditingCompanyInfo(false);
+    setCompanyInfoBackup(null);
+  };
+
+  // Handle add telephone number
+  const handleAddTelephone = () => {
+    setCompanyInfo({
+      ...companyInfo,
+      telephoneNumbers: [...companyInfo.telephoneNumbers, ''],
+    });
+  };
+
+  // Handle remove telephone number
+  const handleRemoveTelephone = (index: number) => {
+    if (companyInfo.telephoneNumbers.length > 1) {
+      setCompanyInfo({
+        ...companyInfo,
+        telephoneNumbers: companyInfo.telephoneNumbers.filter((_, i) => i !== index),
+      });
+    }
+  };
+
+  // Handle telephone number change
+  const handleTelephoneChange = (index: number, value: string) => {
+    const newTelephones = [...companyInfo.telephoneNumbers];
+    newTelephones[index] = value;
+    setCompanyInfo({
+      ...companyInfo,
+      telephoneNumbers: newTelephones,
+    });
+  };
+
   // Handle Password Verification
   const handleVerifyPassword = async () => {
     setConfigPasswordError('');
@@ -351,6 +446,16 @@ const SystemConfig: React.FC = () => {
       } else if (pendingConfigAction === 'edit-mysql') {
         setMysqlConfigBackup({ ...mysqlConfig });
         setIsEditingMysql(true);
+        // Reset modal states (but keep security state cleared)
+        setPasswordModalOpen(false);
+        setConfigPassword('');
+        setConfig2FAToken('');
+        setConfigPasswordError('');
+        setConfig2FAError('');
+        setPendingConfigAction(null);
+      } else if (pendingConfigAction === 'edit-company-info') {
+        setCompanyInfoBackup({ ...companyInfo });
+        setIsEditingCompanyInfo(true);
         // Reset modal states (but keep security state cleared)
         setPasswordModalOpen(false);
         setConfigPassword('');
@@ -619,6 +724,199 @@ const SystemConfig: React.FC = () => {
         
         {/* Main Config Panel */}
         <div className="lg:col-span-2 space-y-6">
+            {/* Company Information */}
+            <div className="bg-white dark:bg-gray-800 shadow rounded-lg border border-gray-200 dark:border-gray-700">
+                <div className="p-6 border-b border-gray-100 dark:border-gray-700">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg">
+                                <Building2 className="text-indigo-600 dark:text-indigo-400" size={24} />
+                            </div>
+                            <div>
+                                <h2 className="text-lg font-medium text-gray-900 dark:text-white">Company Information</h2>
+                                <p className="text-sm text-gray-500 dark:text-gray-400">Manage your company details and registration information.</p>
+                            </div>
+                        </div>
+                        {!isEditingCompanyInfo ? (
+                            <Button 
+                                variant="secondary" 
+                                size="sm" 
+                                onClick={handleEditCompanyInfo} 
+                                icon={<Pencil size={14} />}
+                                className="!bg-blue-600 !hover:bg-blue-700 !text-white !border-blue-600 dark:!bg-blue-500 dark:!hover:bg-blue-600 dark:!border-blue-500 dark:!text-white"
+                            >
+                                Edit
+                            </Button>
+                        ) : (
+                            <div className="flex gap-2">
+                                <Button variant="secondary" size="sm" onClick={handleCancelCompanyInfo}>
+                                    Cancel
+                                </Button>
+                                <Button variant="primary" size="sm" onClick={handleSaveCompanyInfo} icon={<Save size={14} />}>
+                                    Save
+                                </Button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+                <div className="p-6 space-y-4 relative">
+                    <div className={`space-y-4 ${!isEditingCompanyInfo ? 'pointer-events-none opacity-75' : ''}`}>
+                        <div className="relative group">
+                            <Input 
+                                label="Company Name" 
+                                placeholder="e.g., DNS MANPOWER SUPPLIERS" 
+                                value={companyInfo.companyName || ''} 
+                                onChange={(e) => setCompanyInfo({...companyInfo, companyName: e.target.value})}
+                                readOnly={!isEditingCompanyInfo}
+                            />
+                            {!isEditingCompanyInfo && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                    <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                                </div>
+                            )}
+                        </div>
+                        <div className="relative group">
+                            <Input 
+                                label="Owner's Name" 
+                                placeholder="Enter owner's name" 
+                                value={companyInfo.ownerName || ''} 
+                                onChange={(e) => setCompanyInfo({...companyInfo, ownerName: e.target.value})}
+                                readOnly={!isEditingCompanyInfo}
+                            />
+                            {!isEditingCompanyInfo && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                    <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                                </div>
+                            )}
+                        </div>
+                        <div className="relative group">
+                            <Input 
+                                label="Address" 
+                                placeholder="Enter company address" 
+                                value={companyInfo.address || ''} 
+                                onChange={(e) => setCompanyInfo({...companyInfo, address: e.target.value})}
+                                readOnly={!isEditingCompanyInfo}
+                            />
+                            {!isEditingCompanyInfo && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                    <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                                </div>
+                            )}
+                        </div>
+                        <div className="relative group">
+                            <Input 
+                                label="Email Address" 
+                                type="email"
+                                placeholder="company@example.com" 
+                                value={companyInfo.emailAddress || ''} 
+                                onChange={(e) => setCompanyInfo({...companyInfo, emailAddress: e.target.value})}
+                                readOnly={!isEditingCompanyInfo}
+                            />
+                            {!isEditingCompanyInfo && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                    <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                                </div>
+                            )}
+                        </div>
+                        <div className="space-y-2">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Telephone Numbers
+                            </label>
+                            {companyInfo.telephoneNumbers.map((tel, index) => (
+                                <div key={index} className="flex gap-2">
+                                    <div className="flex-1 relative group">
+                                        <Input 
+                                            placeholder="+94 XX XXX XXXX" 
+                                            value={tel} 
+                                            onChange={(e) => handleTelephoneChange(index, e.target.value)}
+                                            readOnly={!isEditingCompanyInfo}
+                                        />
+                                        {!isEditingCompanyInfo && (
+                                            <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                                <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                                            </div>
+                                        )}
+                                    </div>
+                                    {isEditingCompanyInfo && (
+                                        <>
+                                            {index === companyInfo.telephoneNumbers.length - 1 && (
+                                                <Button
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    onClick={handleAddTelephone}
+                                                    icon={<Plus size={14} />}
+                                                    className="!bg-green-600 !hover:bg-green-700 !text-white !border-green-600"
+                                                >
+                                                    Add
+                                                </Button>
+                                            )}
+                                            {companyInfo.telephoneNumbers.length > 1 && (
+                                                <Button
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    onClick={() => handleRemoveTelephone(index)}
+                                                    icon={<Trash2 size={14} />}
+                                                    className="!bg-red-600 !hover:bg-red-700 !text-white !border-red-600"
+                                                >
+                                                    Remove
+                                                </Button>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="relative group">
+                            <Input 
+                                label="Business Registration Number" 
+                                placeholder="Enter business registration number" 
+                                value={companyInfo.businessRegistrationNumber || ''} 
+                                onChange={(e) => setCompanyInfo({...companyInfo, businessRegistrationNumber: e.target.value})}
+                                readOnly={!isEditingCompanyInfo}
+                            />
+                            {!isEditingCompanyInfo && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                    <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                                </div>
+                            )}
+                        </div>
+                        <div className="relative group">
+                            <Input 
+                                label="VAT Registration Number" 
+                                placeholder="Enter VAT registration number" 
+                                value={companyInfo.vatRegistrationNumber || ''} 
+                                onChange={(e) => setCompanyInfo({...companyInfo, vatRegistrationNumber: e.target.value})}
+                                readOnly={!isEditingCompanyInfo}
+                            />
+                            {!isEditingCompanyInfo && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                    <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                                </div>
+                            )}
+                        </div>
+                        <div className="relative group">
+                            <Input 
+                                label="SSCL Registration Number" 
+                                placeholder="Enter SSCL registration number" 
+                                value={companyInfo.ssclRegistrationNumber || ''} 
+                                onChange={(e) => setCompanyInfo({...companyInfo, ssclRegistrationNumber: e.target.value})}
+                                readOnly={!isEditingCompanyInfo}
+                            />
+                            {!isEditingCompanyInfo && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed">
+                                    <Lock className="text-gray-400 dark:text-gray-500" size={20} />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    {companyInfo.updatedAt && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400 pt-2 border-t border-gray-200 dark:border-gray-700">
+                            Last updated: {new Date(companyInfo.updatedAt).toLocaleString()}
+                        </div>
+                    )}
+                </div>
+            </div>
+
             {/* Database Selection */}
             <div className="bg-white dark:bg-gray-800 shadow rounded-lg border border-gray-200 dark:border-gray-700">
                 <div className="p-6 border-b border-gray-100 dark:border-gray-700">
